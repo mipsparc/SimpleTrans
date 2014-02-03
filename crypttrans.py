@@ -61,66 +61,71 @@ class Cipher(object):
         return data
 
 
-def make_tmpfilename(filename):
-    return hashlib.sha1(filename.encode()).hexdigest()[:10]
+class Transfer(object):
+    def __init__(self, SALT, filename=None):
+        self.SALT = SALT
+        self.filename = filename
 
-def send(filename):
-    randomkey = getpass.getpass('RandomKey:')
-    if not len(randomkey) == 8:
-        print('RandomKey must be 8digits')
-        exit()
-    psk = getpass.getpass('Pre Shared Key(Optional):')
-    cryptkey = CryptKey(randomkey, psk, SALT).get()
-    filedata = open(filename,'rb').read()
-    tmpfilename = make_tmpfilename(randomkey)
+    def get_tmpfilename(self):
+        self.tmpfilename =  hashlib.sha1(self.randomkey.encode()).hexdigest()[:10]
 
-    padding_len, crypted_data = Cipher.encrypt(cryptkey, filedata)
-    
-    with open(tmpfilename, 'wb') as f:
-        f.write(crypted_data)
-    
-    #write metadata
-    metadata = json.dumps({'filename':filename, 'padding_len':padding_len})
-    nonce = Random.new().read(16)
-    tempkey = hashlib.sha1(nonce + randomkey.encode()).hexdigest()
-    encrypted_metadata = nonce + ARC4.new(tempkey).encrypt(metadata)
-    with open(tmpfilename+'_data', 'wb') as f:
-        f.write(encrypted_metadata)
+    def send(self):
+        self.randomkey = getpass.getpass('RandomKey:')
+        if not len(self.randomkey) == 8:
+            print('RandomKey must be 8digits')
+            exit()
+        psk = getpass.getpass('Pre Shared Key(Optional):')
+        cryptkey = CryptKey(self.randomkey, psk, self.SALT).get()
+        filedata = open(self.filename,'rb').read()
+        self.get_tmpfilename()
 
-    #run server
-    PORT = 8090
-    Handler = http.server.SimpleHTTPRequestHandler
-    httpd = socketserver.TCPServer(("", PORT), Handler)
-    httpd.serve_forever()
-    print('Waiting...')
-    
-def receive():
-    randomkey = RandomKey().get()
-    print('RandomKey:{}'.format(randomkey))
-    psk = getpass.getpass('Pre Shared Key(Optional):')
-    cryptkey = CryptKey(randomkey, psk, SALT).get()
-    tmpfilename = make_tmpfilename(randomkey)
-    
-    ip_addr = input('IPaddr: ')
-    #read metadata
-    PORT = 8090
-    metadata_uri ='http://{}:{}/{}'.format(ip_addr, PORT, tmpfilename+'_data')
-    encrypted_metadata = urllib.request.urlopen(metadata_uri).read()
-    nonce = encrypted_metadata[:16]
-    tempkey = hashlib.sha1(nonce + randomkey.encode()).hexdigest()
-    metadata = ARC4.new(tempkey).decrypt(encrypted_metadata[16:]).decode()
-    filename = json.loads(metadata)['filename']
-    padding_len = json.loads(metadata)['padding_len']
+        padding_len, crypted_data = Cipher.encrypt(cryptkey, filedata)
+        
+        with open(self.tmpfilename, 'wb') as f:
+            f.write(crypted_data)
+        
+        #write metadata
+        metadata = json.dumps({'filename':self.filename, 'padding_len':padding_len})
+        nonce = Random.new().read(16)
+        tempkey = hashlib.sha1(nonce + self.randomkey.encode()).hexdigest()
+        encrypted_metadata = nonce + ARC4.new(tempkey).encrypt(metadata)
+        with open(self.tmpfilename+'_data', 'wb') as f:
+            f.write(encrypted_metadata)
 
-    #read data
-    data_uri = 'http://{}:{}/{}'.format(ip_addr, PORT, tmpfilename)
-    crypted_data = urllib.request.urlopen(data_uri).read()
-
-    data = Cipher.decrypt(cryptkey, padding_len, crypted_data)
-    with open(filename, 'wb') as f:
-        f.write(data)
+        #run server
+        PORT = 8090
+        Handler = http.server.SimpleHTTPRequestHandler
+        httpd = socketserver.TCPServer(("", PORT), Handler)
+        httpd.serve_forever()
+        print('Waiting...')
     
-    print('Receiving complete: {}({}Bytes)'.format(filename, len(data)))
+    def receive(self):
+        self.randomkey = RandomKey().get()
+        print('RandomKey:{}'.format(self.randomkey))
+        psk = getpass.getpass('Pre Shared Key(Optional):')
+        cryptkey = CryptKey(self.randomkey, psk, self.SALT).get()
+        self.get_tmpfilename()
+        
+        ip_addr = input('IPaddr: ')
+        #read metadata
+        PORT = 8090
+        metadata_uri ='http://{}:{}/{}'.format(ip_addr, PORT, self.tmpfilename+'_data')
+        encrypted_metadata = urllib.request.urlopen(metadata_uri).read()
+        nonce = encrypted_metadata[:16]
+        tempkey = hashlib.sha1(nonce + self.randomkey.encode()).hexdigest()
+        metadata = ARC4.new(tempkey).decrypt(encrypted_metadata[16:]).decode()
+        self.filename = json.loads(metadata)['filename']
+        padding_len = json.loads(metadata)['padding_len']
+
+        #read data
+        data_uri = 'http://{}:{}/{}'.format(ip_addr, PORT, self.tmpfilename)
+        crypted_data = urllib.request.urlopen(data_uri).read()
+
+        data = Cipher.decrypt(cryptkey, padding_len, crypted_data)
+        with open(self.filename, 'wb') as f:
+            f.write(data)
+        
+        print('Receiving complete: {}({}Bytes)'.format(self.filename, len(data)))
 
 
 if __name__ == '__main__':
@@ -128,7 +133,9 @@ if __name__ == '__main__':
     parser.add_argument('-s', '--send', metavar='FILENAME')
     args = parser.parse_args()
     if args.send:
-        send(args.send)
+        transfer = Transfer(SALT, args.send)
+        transfer.send()
     else:
-        receive()
+        transfer = Transfer(SALT)
+        transfer.receive()
 
