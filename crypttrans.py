@@ -61,6 +61,24 @@ class Cipher(object):
         return data
 
 
+class TransHandler(http.server.SimpleHTTPRequestHandler):
+    def do_GET(self):
+        global requested
+        self.send_response(200, 'OK')
+        self.send_header('Content-type', 'html')
+        self.end_headers()
+        req_filename = self.path[1:]
+        print('requested:'+req_filename)
+        if req_filename == transfer.tmpfilename:
+            self.wfile.write(transfer.crypted_data)
+            requested = True
+        elif req_filename == transfer.tmpfilename+'_data':
+            self.wfile.write(transfer.encrypted_metadata)
+
+    def do_HEAD(self):
+        pass
+
+
 class Transfer(object):
     def __init__(self, SALT, filename=None):
         self.SALT = SALT
@@ -70,6 +88,7 @@ class Transfer(object):
         self.tmpfilename =  hashlib.sha1(self.randomkey.encode()).hexdigest()[:10]
 
     def send(self):
+        global requested
         self.randomkey = getpass.getpass('RandomKey:')
         if not len(self.randomkey) == 8:
             print('RandomKey must be 8digits')
@@ -79,25 +98,20 @@ class Transfer(object):
         filedata = open(self.filename,'rb').read()
         self.get_tmpfilename()
 
-        padding_len, crypted_data = Cipher.encrypt(cryptkey, filedata)
-        
-        with open(self.tmpfilename, 'wb') as f:
-            f.write(crypted_data)
+        padding_len, self.crypted_data = Cipher.encrypt(cryptkey, filedata)
         
         #write metadata
         metadata = json.dumps({'filename':self.filename, 'padding_len':padding_len})
         nonce = Random.new().read(16)
         tempkey = hashlib.sha1(nonce + self.randomkey.encode()).hexdigest()
-        encrypted_metadata = nonce + ARC4.new(tempkey).encrypt(metadata)
-        with open(self.tmpfilename+'_data', 'wb') as f:
-            f.write(encrypted_metadata)
+        self.encrypted_metadata = nonce + ARC4.new(tempkey).encrypt(metadata)
 
         #run server
         PORT = 8090
-        Handler = http.server.SimpleHTTPRequestHandler
-        httpd = socketserver.TCPServer(("", PORT), Handler)
-        httpd.serve_forever()
-        print('Waiting...')
+        httpd = socketserver.TCPServer(("", PORT), TransHandler)
+        while not requested:
+            httpd.handle_request()
+        print('done')
     
     def receive(self):
         self.randomkey = RandomKey().get()
@@ -134,6 +148,7 @@ if __name__ == '__main__':
     args = parser.parse_args()
     if args.send:
         transfer = Transfer(SALT, args.send)
+        requested = False
         transfer.send()
     else:
         transfer = Transfer(SALT)
