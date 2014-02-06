@@ -4,14 +4,12 @@ import random
 import argparse
 import getpass
 import hashlib
-from Crypto.Cipher import AES
+from Crypto.Cipher import AES, ARC4
 from Crypto import Random
-from Crypto.Cipher import ARC4
 import json
 import http.server
 import socketserver
 import urllib.request
-import tempfile
 
 SALT = '''aD'T&,\L}u]Ghju[vGTuWxM{1,W]86a,Qb3OO/0eS$1}7cDmA[o61?#?sLF^\B|&}~vs{skgAhkb,=)qY9*xJQ.I9z6JEUbKkP1&$:j%5mHAv=Cp6Hw]bXN8NgE5HL1sRl%%,WS!"|;Z&D{=KO4\`z+/!0%&1@awanH"Z4c-hhd1"qrVr!~a:v}Et*kO7;@B@EipP.+RuDb]z$#QwRn25Ft_>+fG},*$$NEpR|)muq?e6q&>j~,1Gj{IdecLtDzSSyK2z8wWH'Q]<&8P~'QIlX|~PY*]=sQakDO55}lmFehH'''
 
@@ -33,7 +31,6 @@ class CryptKey(object):
 
 
 class Cipher(object):
-    key_length = 32
     @classmethod
     def encrypt(self, key, data):
         iv = Random.new().read(AES.block_size)
@@ -45,7 +42,7 @@ class Cipher(object):
             padding_len = sep_len - data_len
         else:
             padding_len = sep_len - data_len % sep_len
-        data += Random.new().read(padding_len)
+        data += b' ' * padding_len
 
         cipher = AES.new(key, AES.MODE_CBC,iv)
         encrypted_data = iv + cipher.encrypt(data)
@@ -68,10 +65,10 @@ class TransHandler(http.server.SimpleHTTPRequestHandler):
         req_filename = self.path[1:]
         print('requested:'+req_filename)
         if req_filename == transfer.tmpfilename:
-            self.wfile.write(transfer.crypted_data)
+            self.wfile.write(transfer.crypted_transdata)
             requested = True
         elif req_filename == transfer.tmpfilename+'_data':
-            self.wfile.write(transfer.encrypted_metadata)
+            self.wfile.write(transfer.encrypted_transmetadata)
 
     def do_HEAD(self):
         pass
@@ -85,6 +82,20 @@ class Transfer(object):
     def get_tmpfilename(self):
         self.tmpfilename =  hashlib.sha1(self.randomkey.encode()).hexdigest()[:10]
 
+    def get_str_padding(self, padding_len):
+        str_padding_len = str(padding_len)
+        if len(str_padding_len)==1:
+            str_padding_len = '0' + str_padding_len
+        return str_padding_len
+
+    def get_padding(self, str_padding_len):
+        if str_padding_len[0]=='0':
+            padding_len = int(str_padding_len[1])
+        else:
+            padding_len = int(str_padding_len)
+        return padding_len
+
+
     def send(self):
         global requested
         self.randomkey = getpass.getpass('RandomKey:')
@@ -96,13 +107,15 @@ class Transfer(object):
         filedata = open(self.filename,'rb').read()
         self.get_tmpfilename()
 
-        padding_len, self.crypted_data = Cipher.encrypt(cryptkey, filedata)
+        padding_len, crypted_data = Cipher.encrypt(cryptkey, filedata)
+        str_padding_len = self.get_str_padding(padding_len)
+        self.crypted_transdata = str_padding_len.encode() + crypted_data
         
         #write metadata
-        metadata = json.dumps({'filename':self.filename, 'padding_len':padding_len})
-        nonce = Random.new().read(16)
-        tempkey = hashlib.sha1(nonce + self.randomkey.encode()).hexdigest()
-        self.encrypted_metadata = nonce + ARC4.new(tempkey).encrypt(metadata)
+        metadata = json.dumps({'filename':self.filename}).encode()
+        meta_padding_len, encrypted_metadata = Cipher.encrypt(cryptkey, metadata)
+        str_meta_padding_len = self.get_str_padding(meta_padding_len)
+        self.encrypted_transmetadata = str_meta_padding_len.encode() + encrypted_metadata
 
         #run server
         PORT = 8090
@@ -123,17 +136,23 @@ class Transfer(object):
         #read metadata
         PORT = 8090
         metadata_uri ='http://{}:{}/{}'.format(ip_addr, PORT, self.tmpfilename+'_data')
-        encrypted_metadata = urllib.request.urlopen(metadata_uri).read()
-        nonce = encrypted_metadata[:16]
-        tempkey = hashlib.sha1(nonce + self.randomkey.encode()).hexdigest()
-        metadata = ARC4.new(tempkey).decrypt(encrypted_metadata[16:]).decode()
+        encrypted_transmetadata = urllib.request.urlopen(metadata_uri).read()
+        encrypted_metadata = encrypted_transmetadata[2:]
+        str_meta_padding_len = encrypted_transmetadata[:2]
+        meta_padding_len = self.get_padding(str_meta_padding_len)
+        metadata = Cipher.decrypt(
+                        cryptkey, meta_padding_len,encrypted_metadata).decode()
+        print(metadata)
+        
         self.filename = json.loads(metadata)['filename']
-        padding_len = json.loads(metadata)['padding_len']
 
         #read data
         data_uri = 'http://{}:{}/{}'.format(ip_addr, PORT, self.tmpfilename)
-        crypted_data = urllib.request.urlopen(data_uri).read()
-
+        crypted_transdata = urllib.request.urlopen(data_uri).read()
+        crypted_data = crypted_transdata[2:]
+        str_padding_len = crypted_transdata[:2]
+        padding_len = self.get_padding(str_padding_len)
+        
         data = Cipher.decrypt(cryptkey, padding_len, crypted_data)
         with open(self.filename, 'wb') as f:
             f.write(data)
