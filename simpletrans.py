@@ -27,7 +27,7 @@ class RandomKey(object):
 
 class CryptKey(object):
     def __init__(self, randomkey, psk, salt):
-        self.cryptkey = hashlib.sha512((randomkey+psk+salt).encode()).hexdigest()
+        self.cryptkey = hashlib.sha256((randomkey+psk+salt).encode()).digest()
     def get(self):
         return self.cryptkey
 
@@ -37,7 +37,6 @@ class Cipher(object):
     @classmethod
     def encrypt(self, key, data):
         iv = Random.new().read(AES.block_size)
-        key = key[:self.key_length]
 
         #padding
         data_len = len(data)
@@ -55,7 +54,6 @@ class Cipher(object):
     @classmethod
     def decrypt(self, key, padding_len, encrypted_data):
         iv = encrypted_data[:AES.block_size]
-        key = key[:self.key_length]
         cipher = AES.new(key, AES.MODE_CBC, iv)
         data = cipher.decrypt(encrypted_data)[AES.block_size:-padding_len]
         return data
@@ -108,6 +106,7 @@ class Transfer(object):
 
         #run server
         PORT = 8090
+        socketserver.TCPServer.allow_reuse_address = True
         httpd = socketserver.TCPServer(("", PORT), TransHandler)
         while not requested:
             httpd.handle_request()
