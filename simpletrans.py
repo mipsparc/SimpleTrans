@@ -112,7 +112,8 @@ class Transfer(object):
         self.crypted_transdata = str_padding_len.encode() + crypted_data
         
         #write metadata
-        metadata = json.dumps({'filename':self.filename}).encode()
+        hash_data = hashlib.sha512(filedata).hexdigest()
+        metadata = json.dumps({'filename':self.filename, 'hash':hash_data}).encode()
         meta_padding_len, encrypted_metadata = Cipher.encrypt(cryptkey, metadata)
         str_meta_padding_len = self.get_str_padding(meta_padding_len)
         self.encrypted_transmetadata = str_meta_padding_len.encode() + encrypted_metadata
@@ -142,9 +143,9 @@ class Transfer(object):
         meta_padding_len = self.get_padding(str_meta_padding_len)
         metadata = Cipher.decrypt(
                         cryptkey, meta_padding_len,encrypted_metadata).decode()
-        print(metadata)
         
         self.filename = json.loads(metadata)['filename']
+        hash_data = json.loads(metadata)['hash']
 
         #read data
         data_uri = 'http://{}:{}/{}'.format(ip_addr, PORT, self.tmpfilename)
@@ -154,6 +155,12 @@ class Transfer(object):
         padding_len = self.get_padding(str_padding_len)
         
         data = Cipher.decrypt(cryptkey, padding_len, crypted_data)
+
+        hash_received = hashlib.sha512(data).hexdigest()
+        if not hash_received == hash_data:
+           print('Validation check failed!')
+           exit()
+
         with open(self.filename, 'wb') as f:
             f.write(data)
         
