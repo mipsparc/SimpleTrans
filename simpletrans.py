@@ -4,7 +4,7 @@ import random
 import argparse
 import getpass
 import hashlib
-from Crypto.Cipher import AES, ARC4
+from Crypto.Cipher import AES
 from Crypto import Random
 import json
 import http.server
@@ -23,11 +23,11 @@ class RandomKey(object):
         return self.randomkey
 
 
-class CryptKey(object):
+class EncryptKey(object):
     def __init__(self, randomkey, psk, salt):
-        self.cryptkey = hashlib.sha256((randomkey+psk+salt).encode()).digest()
+        self.encryptkey = hashlib.sha256((randomkey+psk+salt).encode()).digest()
     def get(self):
-        return self.cryptkey
+        return self.encryptkey
 
 
 class Cipher(object):
@@ -65,7 +65,7 @@ class TransHandler(http.server.SimpleHTTPRequestHandler):
         req_filename = self.path[1:]
         print('requested:'+req_filename)
         if req_filename == transfer.tmpfilename:
-            self.wfile.write(transfer.crypted_transdata)
+            self.wfile.write(transfer.encrypted_transdata)
             requested = True
         elif req_filename == transfer.tmpfilename+'_data':
             self.wfile.write(transfer.encrypted_transmetadata)
@@ -103,18 +103,18 @@ class Transfer(object):
             print('RandomKey must be 8digits')
             exit()
         psk = getpass.getpass('Pre Shared Key(Optional):')
-        cryptkey = CryptKey(self.randomkey, psk, self.SALT).get()
+        encryptkey = EncryptKey(self.randomkey, psk, self.SALT).get()
         filedata = open(self.filename,'rb').read()
         self.get_tmpfilename()
 
-        padding_len, crypted_data = Cipher.encrypt(cryptkey, filedata)
+        padding_len, encrypted_data = Cipher.encrypt(encryptkey, filedata)
         str_padding_len = self.get_str_padding(padding_len)
-        self.crypted_transdata = str_padding_len.encode() + crypted_data
+        self.encrypted_transdata = str_padding_len.encode() + encrypted_data
         
         #write metadata
         hash_data = hashlib.sha512(filedata).hexdigest()
         metadata = json.dumps({'filename':self.filename, 'hash':hash_data}).encode()
-        meta_padding_len, encrypted_metadata = Cipher.encrypt(cryptkey, metadata)
+        meta_padding_len, encrypted_metadata = Cipher.encrypt(encryptkey, metadata)
         str_meta_padding_len = self.get_str_padding(meta_padding_len)
         self.encrypted_transmetadata = str_meta_padding_len.encode() + encrypted_metadata
 
@@ -130,7 +130,7 @@ class Transfer(object):
         self.randomkey = RandomKey().get()
         print('RandomKey:{}'.format(self.randomkey))
         psk = getpass.getpass('Pre Shared Key(Optional):')
-        cryptkey = CryptKey(self.randomkey, psk, self.SALT).get()
+        encryptkey = EncryptKey(self.randomkey, psk, self.SALT).get()
         self.get_tmpfilename()
         
         ip_addr = input('IPaddr: ')
@@ -142,19 +142,19 @@ class Transfer(object):
         str_meta_padding_len = encrypted_transmetadata[:2]
         meta_padding_len = self.get_padding(str_meta_padding_len)
         metadata = Cipher.decrypt(
-                        cryptkey, meta_padding_len,encrypted_metadata).decode()
+                        encryptkey, meta_padding_len,encrypted_metadata).decode()
         
         self.filename = json.loads(metadata)['filename']
         hash_data = json.loads(metadata)['hash']
 
         #read data
         data_uri = 'http://{}:{}/{}'.format(ip_addr, PORT, self.tmpfilename)
-        crypted_transdata = urllib.request.urlopen(data_uri).read()
-        crypted_data = crypted_transdata[2:]
-        str_padding_len = crypted_transdata[:2]
+        encrypted_transdata = urllib.request.urlopen(data_uri).read()
+        encrypted_data = encrypted_transdata[2:]
+        str_padding_len = encrypted_transdata[:2]
         padding_len = self.get_padding(str_padding_len)
         
-        data = Cipher.decrypt(cryptkey, padding_len, crypted_data)
+        data = Cipher.decrypt(encryptkey, padding_len, encrypted_data)
 
         hash_received = hashlib.sha512(data).hexdigest()
         if not hash_received == hash_data:
