@@ -10,8 +10,10 @@ import json
 import http.server
 import socketserver
 import urllib.request
+import socket
 
 SALT = '''aD'T&,\L}u]Ghju[vGTuWxM{1,W]86a,Qb3OO/0eS$1}7cDmA[o61?#?sLF^\B|&}~vs{skgAhkb,=)qY9*xJQ.I9z6JEUbKkP1&$:j%5mHAv=Cp6Hw]bXN8NgE5HL1sRl%%,WS!"|;Z&D{=KO4\`z+/!0%&1@awanH"Z4c-hhd1"qrVr!~a:v}Et*kO7;@B@EipP.+RuDb]z$#QwRn25Ft_>+fG},*$$NEpR|)muq?e6q&>j~,1Gj{IdecLtDzSSyK2z8wWH'Q]<&8P~'QIlX|~PY*]=sQakDO55}lmFehH'''
+SALT_FIND = '''AgJM4qH{vBqy`BY7f]Td0y{7&q_KIeQ694GwF#5p`h1JII9+k6m-B/uvOr_W&*R]"2ym~Y>[IM-OP<_)U$INl<S)Qb-XX5;ZkJ\Ih,d{0tMn(6ql9M0LAf2A&CJ#!X/%^P^["yS2gWu,Nwl]$)C-Z>f-eZ-0)%.k(:(Wq[70>XNZF95I5'++~,[aP%6nIb6;8EjhqnUS^t"v_o23',u<fdE}kKV^2EQMM8DJHi,MV*,+;eg|s.)>%zlg(8oQSz\+Pe0?~/v%8yp=fgbH|COx6N>d*Wn;EU>]#zjf[GY-:/$?'''
 
 
 class RandomKey(object):
@@ -73,6 +75,61 @@ class TransHandler(http.server.SimpleHTTPRequestHandler):
     def do_HEAD(self):
         pass
 
+class SearchHost(object):
+    def __init__(self, PORT, key):
+        self.PORT = PORT
+        self.key = key
+
+    def search(self):
+        #UDP
+        search_data = hashlib.sha256(SALT_FIND.encode() + self.key + b'FIND').digest()
+
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, True)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, True)
+        HOST = '<broadcast>'
+        sock.sendto(search_data, (HOST, self.PORT))
+
+    def receive(self):
+        #UDP
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        HOST = ''
+        sock.bind((HOST, self.PORT))
+        search_data = hashlib.sha256(SALT_FIND.encode() + self.key + b'FIND').digest()
+        received_data = ''
+        while not received_data == search_data:
+            received_data, address = sock.recvfrom(4096)
+        self.address = address[0]
+
+    def response(self):
+        #TCP
+        response_data = hashlib.sha256(SALT_FIND.encode() + self.key +
+                            b'ACCEPT').digest()
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, True)
+        sock.connect((self.address, self.PORT))
+        sock.send(response_data)
+        sock.close()
+
+    def receive_response(self):
+        #TCP
+        response_data = hashlib.sha256(SALT_FIND.encode() + self.key +
+                            b'ACCEPT').digest()
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, True)
+        HOST = ''
+        sock.bind((HOST, self.PORT))
+        sock.listen(1)
+
+        conn, address = sock.accept()
+        self.ip_address = address[0]
+        received_data = conn.recv(4096)
+
+        if received_data == response_data:
+            print('Host Found!')
+        else:
+            print('Host is invalid!')
+            exit()
 
 class Transfer(object):
     def __init__(self, SALT, filename=None):
@@ -95,7 +152,6 @@ class Transfer(object):
             padding_len = int(str_padding_len)
         return padding_len
 
-
     def send(self):
         global requested
         self.randomkey = getpass.getpass('RandomKey:')
@@ -107,16 +163,22 @@ class Transfer(object):
         filedata = open(self.filename,'rb').read()
         self.get_tmpfilename()
 
+        #make data
         padding_len, encrypted_data = Cipher.encrypt(encryptkey, filedata)
         str_padding_len = self.get_str_padding(padding_len)
         self.encrypted_transdata = str_padding_len.encode() + encrypted_data
         
-        #write metadata
+        #make metadata
         hash_data = hashlib.sha512(filedata).hexdigest()
         metadata = json.dumps({'filename':self.filename, 'hash':hash_data}).encode()
         meta_padding_len, encrypted_metadata = Cipher.encrypt(encryptkey, metadata)
         str_meta_padding_len = self.get_str_padding(meta_padding_len)
         self.encrypted_transmetadata = str_meta_padding_len.encode() + encrypted_metadata
+
+        #search client
+        search = SearchHost(8091, encryptkey)
+        search.receive()
+        search.response()
 
         #run server
         PORT = 8090
@@ -132,8 +194,13 @@ class Transfer(object):
         psk = getpass.getpass('Pre Shared Key(Optional):')
         encryptkey = EncryptKey(self.randomkey, psk, self.SALT).get()
         self.get_tmpfilename()
+
+        #search host
+        search = SearchHost(8091, encryptkey)
+        search.search()
+        search.receive_response()
+        ip_addr = search.ip_address
         
-        ip_addr = input('IPaddr: ')
         #read metadata
         PORT = 8090
         metadata_uri ='http://{}:{}/{}'.format(ip_addr, PORT, self.tmpfilename+'_data')
