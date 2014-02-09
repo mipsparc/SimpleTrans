@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+
 '''Transfer a file very simply with encryption.
 '''
 import random
