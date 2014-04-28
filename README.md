@@ -5,6 +5,8 @@ This software transfer a file with high-level encryption. You just have to type 
 Author: mipsparc(Twitter:@mipsparc, Web:https://mipsparc.net/, Mail:mipsparc@gmail.com)
 License: The MIT License
 
+##Required module
+- Diffie-Hellman3 from https://gist.github.com/anonymous/11324965#file-diffiehellman3-py
+
 ##TODO
-- RSA key exchange feature
 - GUI

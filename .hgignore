@@ -1,0 +1,7 @@
+syntax: glob
+DiffieHellman3.py
+simpletrans.py.orig
+test.png
+hoge.txt
+__pycache__
+.hg
