@@ -253,8 +253,11 @@ class ExchangeKey(object):
 
 
 class Transfer(object):
-    def __init__(self, filename=None):
-        self.filename = filename
+    def __init__(self, port):
+        if not port:
+            self.PORT = 8095
+        else:
+            self.PORT = int(port)
 
     def get_tmpfilename(self):
         self.tmpfilename = hashlib.sha1(
@@ -273,9 +276,11 @@ class Transfer(object):
             padding_len = int(str_padding_len)
         return padding_len
 
-    def send(self):
+    def send(self, filename):
         global finished_transfer
         global allow_ip_address
+
+        self.filename = filename
 
         print('Please enter the RandomKey on the sending machine.')
         self.randomkey = getpass.getpass('RandomKey:')
@@ -290,14 +295,13 @@ class Transfer(object):
         self.search_id = keygenerator.get_search_id()
 
         #search client
-        PORT = 8095
-        search = SearchHost(PORT, self.search_id)
+        search = SearchHost(self.PORT, self.search_id)
         search.send_node()
         allow_ip_address = search.ip_address
 
         #diffie-hellman key-exchange
         print('Key exchanging...')
-        keyexchanger = ExchangeKey(diffie_key, search.ip_address, PORT)
+        keyexchanger = ExchangeKey(diffie_key, search.ip_address, self.PORT)
         keyexchanger.send_node()
         encryptkey = keyexchanger.key
 
@@ -323,7 +327,7 @@ class Transfer(object):
 
         #run server
         socketserver.TCPServer.allow_reuse_address = True
-        httpd = socketserver.TCPServer(("", PORT), TransHandler)
+        httpd = socketserver.TCPServer(("", self.PORT), TransHandler)
 
         finished_transfer = False
         while not finished_transfer:
@@ -342,20 +346,19 @@ class Transfer(object):
         self.get_tmpfilename()
 
         #search host
-        PORT = 8095
-        search = SearchHost(PORT, self.search_id)
+        search = SearchHost(self.PORT, self.search_id)
         search.receive_node()
         ip_addr = search.ip_address
 
         #diffie-hellman key exchange
         print('Key exchanging...')
-        keyexchanger = ExchangeKey(diffie_key, ip_addr, PORT)
+        keyexchanger = ExchangeKey(diffie_key, ip_addr, self.PORT)
         keyexchanger.receive_node()
         encryptkey = keyexchanger.key
 
         print('Waiting for sending...')
         #read metadata
-        base_uri = 'http://{}:{}/'.format(ip_addr, PORT)
+        base_uri = 'http://{}:{}/'.format(ip_addr, self.PORT)
         metadata_uri = base_uri + self.tmpfilename + '_data'
         not_connected = True
         #wait for ready
@@ -404,10 +407,11 @@ class Transfer(object):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('-s', '--send', metavar='FILENAME')
+    parser.add_argument('-p', '--port', metavar='PORT')
     args = parser.parse_args()
     if args.send:
-        transfer = Transfer(args.send)
-        transfer.send()
+        transfer = Transfer(args.port)
+        transfer.send(args.send)
     else:
-        transfer = Transfer()
+        transfer = Transfer(args.port)
         transfer.receive()
