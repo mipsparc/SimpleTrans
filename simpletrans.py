@@ -16,6 +16,7 @@ import socket
 import DiffieHellman3
 import base64
 import time
+import os.path
 
 SALT = '''aD'T&,\L}u]Ghju[vGTuWxM{1,W]86a,Qb3OO/0eS$1}7cDmA[o61?#?sLF^\B|&}~vs
 {skgAhkb,=)qY9*xJQ.I9z6JEUbKkP1&$:j%5mHAv=Cp6Hw]bXN8NgE5HL1sRl%%,WS!"|;Z&D{=KO
@@ -302,7 +303,9 @@ class Transfer(object):
 
         #make data
         print('Encrypting...')
-        filedata = open(self.filename, 'rb').read()
+        file_path = os.path.abspath(self.filename)
+        basename = os.path.basename(self.filename)
+        filedata = open(file_path, 'rb').read()
         self.get_tmpfilename()
         padding_len, encrypted_data = Cipher.encrypt(encryptkey, filedata)
         str_padding_len = self.get_str_padding(padding_len)
@@ -311,7 +314,7 @@ class Transfer(object):
         #make metadata
         hash_data = hashlib.sha512(filedata).hexdigest()
         metadata = json.dumps(
-            {'filename': self.filename, 'hash': hash_data}).encode()
+            {'filename': basename, 'hash': hash_data}).encode()
         meta_padding_len, encrypted_metadata = \
             Cipher.encrypt(encryptkey, metadata)
         str_meta_padding_len = self.get_str_padding(meta_padding_len)
@@ -389,6 +392,8 @@ class Transfer(object):
             print('Validation check failed!')
             exit()
 
+        #write with basename
+        self.filename = os.path.basename(self.filename)
         with open(self.filename, 'wb') as f:
             f.write(data)
 
