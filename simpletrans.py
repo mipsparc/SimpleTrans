@@ -36,10 +36,11 @@ class RandomKey(object):
 
 class GenerateKey(object):
     def __init__(self, randomkey, psk):
-        hash_times = 500
+        hash_times = 10000
         seed = randomkey+psk+SALT
         self.hash_result = str(seed).encode()
         for i in range(hash_times):
+            self.hash_result += (psk+SALT).encode()
             self.hash_result = hashlib.sha256(self.hash_result).digest()
 
     def get_key(self):
@@ -82,19 +83,23 @@ class TransHandler(http.server.SimpleHTTPRequestHandler):
         global finished_transfer
         global allow_ip_address
 
-        print(self.client_address)
         if self.client_address[0] == allow_ip_address:
             self.send_response(200, 'OK')
             self.send_header('Content-type', 'html')
             self.end_headers()
             req_filename = self.path[1:]
             if req_filename == transfer.tmpfilename:
+                print('Sending...')
                 self.wfile.write(transfer.encrypted_transdata)
                 finished_transfer = True
             elif req_filename == transfer.tmpfilename+'_data':
                 self.wfile.write(transfer.encrypted_transmetadata)
 
     def do_HEAD(self):
+        pass
+
+    #be quiet!
+    def log_message(self, format, *args):
         pass
 
 
@@ -230,7 +235,6 @@ class ExchangeKey(object):
             if recv_data == '':
                 break
             self.received_data += recv_data
-        print(self.received_data)
 
     def send_node(self):
         time.sleep(0.5)
@@ -291,11 +295,13 @@ class Transfer(object):
         allow_ip_address = search.ip_address
 
         #diffie-hellman key-exchange
+        print('Key exchanging...')
         keyexchanger = ExchangeKey(diffie_key, search.ip_address, PORT)
         keyexchanger.send_node()
         encryptkey = keyexchanger.key
 
         #make data
+        print('Encrypting...')
         filedata = open(self.filename, 'rb').read()
         self.get_tmpfilename()
         padding_len, encrypted_data = Cipher.encrypt(encryptkey, filedata)
@@ -339,6 +345,7 @@ class Transfer(object):
         ip_addr = search.ip_address
 
         #diffie-hellman key exchange
+        print('Key exchanging...')
         keyexchanger = ExchangeKey(diffie_key, ip_addr, PORT)
         keyexchanger.receive_node()
         encryptkey = keyexchanger.key
@@ -346,8 +353,17 @@ class Transfer(object):
         #read metadata
         base_uri = 'http://{}:{}/'.format(ip_addr, PORT)
         metadata_uri = base_uri + self.tmpfilename + '_data'
-        print(self.tmpfilename)
-        encrypted_transmetadata = urllib.request.urlopen(metadata_uri).read()
+        not_connected = True
+        #wait for ready
+        while not_connected:
+            time.sleep(1)
+            try:
+                encrypted_transmetadata = urllib.request.urlopen(metadata_uri).read()
+            except urllib.error.URLError as e:
+                pass
+            else:
+                not_connected = False
+
         encrypted_metadata = encrypted_transmetadata[2:]
         str_meta_padding_len = encrypted_transmetadata[:2]
         meta_padding_len = self.get_padding(str_meta_padding_len)
@@ -358,6 +374,7 @@ class Transfer(object):
         hash_data = json.loads(metadata)['hash']
 
         #read data
+        print('Receiving...')
         data_uri = base_uri + self.tmpfilename
         encrypted_transdata = urllib.request.urlopen(data_uri).read()
         encrypted_data = encrypted_transdata[2:]
