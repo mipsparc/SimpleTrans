@@ -350,6 +350,7 @@ class Transfer(object):
         keyexchanger.receive_node()
         encryptkey = keyexchanger.key
 
+        print('Waiting for sending...')
         #read metadata
         base_uri = 'http://{}:{}/'.format(ip_addr, PORT)
         metadata_uri = base_uri + self.tmpfilename + '_data'

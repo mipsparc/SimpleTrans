@@ -8,5 +8,9 @@ License: The MIT License
 ##Required module
 - Diffie-Hellman3 from https://gist.github.com/anonymous/11324965
 
+##Before using
+- Open 8095 UDP/TCP port
+ex)Ubuntu `sudo ufw allow 8095`
+
 ##TODO
 - GUI
