@@ -443,9 +443,9 @@ class Transfer(object):
         compressed_data = Cipher.decrypt(encryptkey, padding_len, encrypted_data)
         
         #decompress
-        #not compressed
         print('Decompressing...')
-        if compress_type == 'None':
+        #not compressed
+        if compress_type == 'none':
             data = compressed_data
         elif compress_type == 'zlib':
             import zlib
@@ -469,21 +469,26 @@ class Transfer(object):
 
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('-s', '--send', metavar='FILENAME')
-    parser.add_argument('-p', '--port', type=int, metavar='PORT')
-    parser.add_argument('-c', '--compress', choices=['zlib','bz2','none'],
-                        metavar='COMPRESS-TYPE')
-    args = parser.parse_args()
-    if args.send:
-        if not args.compress:
-            compress = 'zlib'
+    def split_type(s):
+        default = 'zlib'
+        if ":" in s:
+            return tuple(s.split(":", 1))
         else:
-            compress = args.compress
-        transfer = Transfer(args.port)
-        transfer.send(args.send, compress)
+            return s, default
+
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('-s', '--send', metavar='FILENAME[:COMPRESS-TYPE]',
+                        help='Compress:zlib(default),bz2,none', type=split_type)
+    parser.add_argument('-p', '--port', type=int, metavar='PORT')
+    args = parser.parse_args()
+    
+    if args.send:
+        filename, compress = args.send
+        if compress in ['zlib','bz2','none']:
+            transfer = Transfer(args.port)
+            transfer.send(filename, compress)
+        else:
+            print('Compress type must be zlib, bz2 or none')
     else:
-        if args.compress:
-            print('Info: Receiver doesn\'t needs to select compress-type')
         transfer = Transfer(args.port)
         transfer.receive()
