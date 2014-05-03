@@ -276,7 +276,7 @@ class Transfer(object):
             padding_len = int(str_padding_len)
         return padding_len
 
-    def send(self, filename):
+    def send(self, filename, compress_type):
         global finished_transfer
         global allow_ip_address
 
@@ -310,19 +310,35 @@ class Transfer(object):
         encryptkey = keyexchanger.key
 
         #make data
-        print('Encrypting...')
         file_path = os.path.abspath(self.filename)
         basename = os.path.basename(self.filename)
         filedata = open(file_path, 'rb').read()
+        
+        #compress
+        if compress_type == 'none':
+            compressed_data = filedata
+        elif compress_type == 'zlib':
+            import zlib
+            compressed_data = zlib.compress(filedata)
+        elif compress_type == 'bz2':
+            import bz2
+            compressed_data = bz2.compress(filedata)
+
+        #encrypt
+        print('Encrypting...')
         self.get_tmpfilename()
-        padding_len, encrypted_data = Cipher.encrypt(encryptkey, filedata)
+        padding_len, encrypted_data = Cipher.encrypt(encryptkey, compressed_data)
         str_padding_len = self.get_str_padding(padding_len)
         self.encrypted_transdata = str_padding_len.encode() + encrypted_data
 
+
         #make metadata
+        print('Compressing...')
         hash_data = hashlib.sha512(filedata).hexdigest()
-        metadata = json.dumps(
-            {'filename': basename, 'hash': hash_data}).encode()
+        metadata = json.dumps({
+            'filename': basename,
+            'hash': hash_data,
+            'compress_type':compress_type}).encode()
         meta_padding_len, encrypted_metadata = \
             Cipher.encrypt(encryptkey, metadata)
         str_meta_padding_len = self.get_str_padding(meta_padding_len)
@@ -345,7 +361,6 @@ class Transfer(object):
             os.mkdir(download_dir)
         except FileExistsError:
             pass
-            
         self.randomkey = RandomKey().get()
         try:
             print('RandomKey:{}'.format(self.randomkey))
@@ -396,6 +411,7 @@ class Transfer(object):
 
         self.filename = json.loads(metadata)['filename']
         hash_data = json.loads(metadata)['hash']
+        compress_type = json.loads(metadata)['compress_type']
 
         #write with only filename(ex. /boot/hoge->hoge)
         self.filename = os.path.basename(self.filename)
@@ -424,7 +440,19 @@ class Transfer(object):
         str_padding_len = encrypted_transdata[:2]
         padding_len = self.get_padding(str_padding_len)
 
-        data = Cipher.decrypt(encryptkey, padding_len, encrypted_data)
+        compressed_data = Cipher.decrypt(encryptkey, padding_len, encrypted_data)
+        
+        #decompress
+        #not compressed
+        print('Decompressing...')
+        if compress_type == 'None':
+            data = compressed_data
+        elif compress_type == 'zlib':
+            import zlib
+            data = zlib.decompress(compressed_data)
+        elif compress_type == 'bz2':
+            import bz2
+            data = bz2.decompress(compressed_data)
 
         hash_received = hashlib.sha512(data).hexdigest()
         if not hash_received == hash_data:
@@ -443,11 +471,19 @@ class Transfer(object):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('-s', '--send', metavar='FILENAME')
-    parser.add_argument('-p', '--port', metavar='PORT')
+    parser.add_argument('-p', '--port', type=int, metavar='PORT')
+    parser.add_argument('-c', '--compress', choices=['zlib','bz2','none'],
+                        metavar='COMPRESS-TYPE')
     args = parser.parse_args()
     if args.send:
+        if not args.compress:
+            compress = 'zlib'
+        else:
+            compress = args.compress
         transfer = Transfer(args.port)
-        transfer.send(args.send)
+        transfer.send(args.send, compress)
     else:
+        if args.compress:
+            print('Info: Receiver doesn\'t needs to select compress-type')
         transfer = Transfer(args.port)
         transfer.receive()
