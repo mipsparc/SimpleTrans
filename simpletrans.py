@@ -26,7 +26,7 @@ $NEpR|)muq?e6q&>j~,1Gj{IdecLtDzSSyK2z8wWH'Q]<&8P~'QIlX|~PY*]=sQakDO55}lmFehH'''
 
 class RandomKey(object):
     def __init__(self):
-        char_map='#$%&*+23456789=?ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz'
+        char_map='23456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz'
         key_length = 8
         self.randomkey = ''.join([random.choice(char_map) for i in \
             range(key_length)])
@@ -283,11 +283,15 @@ class Transfer(object):
         self.filename = filename
 
         print('Please enter the RandomKey on the sending machine.')
-        self.randomkey = getpass.getpass('RandomKey:')
-        if not len(self.randomkey) == 8:
-            print('RandomKey must be 8characters')
+        try:
+            self.randomkey = getpass.getpass('RandomKey:')
+            if not len(self.randomkey) == 8:
+                print('RandomKey must be 8characters')
+                exit()
+            psk = getpass.getpass('Pre Shared Key(Optional):')
+        except KeyboardInterrupt:
+            print()
             exit()
-        psk = getpass.getpass('Pre Shared Key(Optional):')
 
         #generate diffiekey/search_id
         keygenerator = GenerateKey(self.randomkey, psk)
@@ -336,8 +340,12 @@ class Transfer(object):
 
     def receive(self):
         self.randomkey = RandomKey().get()
-        print('RandomKey:{}'.format(self.randomkey))
-        psk = getpass.getpass('Pre Shared Key(Optional):')
+        try:
+            print('RandomKey:{}'.format(self.randomkey))
+            psk = getpass.getpass('Pre Shared Key(Optional):')
+        except KeyboardInterrupt:
+            print()
+            exit()
 
         keygenerator = GenerateKey(self.randomkey, psk)
         diffie_key = keygenerator.get_key()
@@ -395,8 +403,24 @@ class Transfer(object):
             print('Validation check failed!')
             exit()
 
-        #write with basename
+        #write with only filename(ex. /boot/hoge->hoge)
         self.filename = os.path.basename(self.filename)
+        #if already exists
+        file_ver = 1
+        while os.path.exists(self.filename):
+            print('"{}" already exists'.format(self.filename))
+            #for multiple ext
+            ext = None
+            tail = ''
+            rootname = self.filename
+            while ext!='':
+                rootname, ext = os.path.splitext(rootname) 
+                tail = ext+tail
+            self.filename = '{}-1{}'.format(rootname, tail)
+            file_ver += 1
+
+        print('Save as {}'.format(self.filename))
+        print('Writing...')
         with open(self.filename, 'wb') as f:
             f.write(data)
 

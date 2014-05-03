@@ -11,6 +11,13 @@ License: The MIT License
 ##Before using
 - Open 8095 UDP/TCP port
 ex)Ubuntu `sudo ufw allow 8095`
+- chmod 755 simpletrans.py
+
+##How to use
+See `./simpletrans.py --help`
+
+##Issues
+- Big files will eat whole your memory
 
 ##TODO
 - GUI
