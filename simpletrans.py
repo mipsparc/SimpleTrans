@@ -388,6 +388,23 @@ class Transfer(object):
         self.filename = json.loads(metadata)['filename']
         hash_data = json.loads(metadata)['hash']
 
+        #write with only filename(ex. /boot/hoge->hoge)
+        self.filename = os.path.basename(self.filename)
+        #if already exists
+        self.write_filename = self.filename
+        file_ver = 1
+        while os.path.exists(self.write_filename):
+            print('"{}" already exists'.format(self.write_filename))
+            #for multiple ext
+            ext = None
+            tail = ''
+            rootname = self.filename
+            while ext!='':
+                rootname, ext = os.path.splitext(rootname) 
+                tail = ext+tail
+            self.write_filename = '{}-{}{}'.format(rootname, file_ver, tail)
+            file_ver += 1
+
         #read data
         print('Receiving...')
         data_uri = base_uri + self.tmpfilename
@@ -402,26 +419,10 @@ class Transfer(object):
         if not hash_received == hash_data:
             print('Validation check failed!')
             exit()
-
-        #write with only filename(ex. /boot/hoge->hoge)
-        self.filename = os.path.basename(self.filename)
-        #if already exists
-        file_ver = 1
-        while os.path.exists(self.filename):
-            print('"{}" already exists'.format(self.filename))
-            #for multiple ext
-            ext = None
-            tail = ''
-            rootname = self.filename
-            while ext!='':
-                rootname, ext = os.path.splitext(rootname) 
-                tail = ext+tail
-            self.filename = '{}-1{}'.format(rootname, tail)
-            file_ver += 1
-
-        print('Save as {}'.format(self.filename))
+        
+        print('Save as {}'.format(self.write_filename))
         print('Writing...')
-        with open(self.filename, 'wb') as f:
+        with open(self.write_filename, 'wb') as f:
             f.write(data)
 
         print('Receiving complete: {}({}Bytes)'.format(
