@@ -26,10 +26,10 @@ $NEpR|)muq?e6q&>j~,1Gj{IdecLtDzSSyK2z8wWH'Q]<&8P~'QIlX|~PY*]=sQakDO55}lmFehH'''
 
 class RandomKey(object):
     def __init__(self):
-        char_map='23456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz'
+        char_map = '23456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz'
         key_length = 8
-        self.randomkey = ''.join([random.choice(char_map) for i in \
-            range(key_length)])
+        self.randomkey = ''.join(
+            [random.choice(char_map) for i in range(key_length)])
 
     def get(self):
         return self.randomkey
@@ -38,10 +38,10 @@ class RandomKey(object):
 class GenerateKey(object):
     def __init__(self, randomkey, psk):
         hash_times = 10000
-        seed = randomkey+psk+SALT
+        seed = randomkey + psk + SALT
         self.hash_result = str(seed).encode()
         for i in range(hash_times):
-            self.hash_result += (psk+SALT).encode()
+            self.hash_result += (psk + SALT).encode()
             self.hash_result = hashlib.sha256(self.hash_result).digest()
 
     def get_key(self):
@@ -93,7 +93,7 @@ class TransHandler(http.server.SimpleHTTPRequestHandler):
                 print('Sending...')
                 self.wfile.write(transfer.encrypted_transdata)
                 finished_transfer = True
-            elif req_filename == transfer.tmpfilename+'_data':
+            elif req_filename == transfer.tmpfilename + '_data':
                 self.wfile.write(transfer.encrypted_transmetadata)
 
     def do_HEAD(self):
@@ -112,12 +112,12 @@ class SearchHost(object):
 
     def receive_node(self):
         while not self.ip_address:
-            self.search()     
+            self.search()
             try:
                 self.receive_response()
             except socket.timeout:
                 pass
-        
+
     #receive node
     def search(self):
         #UDP
@@ -193,19 +193,19 @@ class ExchangeKey(object):
         self.encrypt_publickey()
 
     def encrypt_publickey(self):
-        padding_len, encrypted_pubkey = \
-                Cipher.encrypt(self.diffie_key, str(self.pubkey).encode())
+        padding_len, encrypted_pubkey = Cipher.encrypt(
+            self.diffie_key, str(self.pubkey).encode())
         b64_encrypted_pubkey = base64.b64encode(encrypted_pubkey)
-        self.send_data = json.dumps((padding_len,
-                b64_encrypted_pubkey.decode())).encode()
+        self.send_data = json.dumps(
+            (padding_len, b64_encrypted_pubkey.decode())).encode()
 
     def decrypt_publickey(self):
-        opposit_padding_len, b64_encrypted_opposit_pubkey = \
-                json.loads(self.received_data)
-        encrypted_opposit_pubkey = \
-                base64.b64decode(b64_encrypted_opposit_pubkey.encode())
-        self.opposit_pubkey = int(Cipher.decrypt(self.diffie_key,
-                opposit_padding_len, encrypted_opposit_pubkey))
+        opposit_padding_len, b64_encrypted_opposit_pubkey = json.loads(
+            self.received_data)
+        encrypted_opposit_pubkey = base64.b64decode(
+            b64_encrypted_opposit_pubkey.encode())
+        self.opposit_pubkey = int(Cipher.decrypt(
+            self.diffie_key, opposit_padding_len, encrypted_opposit_pubkey))
 
     def gen_publickey(self):
         self.pubkey = self.diffie.publicKey
@@ -373,7 +373,8 @@ class Transfer(object):
         while not_connected:
             time.sleep(1)
             try:
-                encrypted_transmetadata = urllib.request.urlopen(metadata_uri).read()
+                encrypted_transmetadata = urllib.request.urlopen(
+                    metadata_uri).read()
             except urllib.error.URLError as e:
                 pass
             else:
@@ -399,9 +400,9 @@ class Transfer(object):
             ext = None
             tail = ''
             rootname = self.filename
-            while ext!='':
-                rootname, ext = os.path.splitext(rootname) 
-                tail = ext+tail
+            while ext != '':
+                rootname, ext = os.path.splitext(rootname)
+                tail = ext + tail
             self.write_filename = '{}-{}{}'.format(rootname, file_ver, tail)
             file_ver += 1
 
@@ -419,7 +420,7 @@ class Transfer(object):
         if not hash_received == hash_data:
             print('Validation check failed!')
             exit()
-        
+
         print('Save as {}'.format(self.write_filename))
         print('Writing...')
         with open(self.write_filename, 'wb') as f:
