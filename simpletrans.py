@@ -339,6 +339,13 @@ class Transfer(object):
         print('Sending complete')
 
     def receive(self):
+        #check download dir
+        download_dir = 'DownloadFiles'
+        try:
+            os.mkdir(download_dir)
+        except FileExistsError:
+            pass
+            
         self.randomkey = RandomKey().get()
         try:
             print('RandomKey:{}'.format(self.randomkey))
@@ -376,7 +383,8 @@ class Transfer(object):
                 encrypted_transmetadata = urllib.request.urlopen(
                     metadata_uri).read()
             except urllib.error.URLError as e:
-                pass
+                if e.args[0].errno != 111:
+                    print(e)
             else:
                 not_connected = False
 
@@ -394,7 +402,7 @@ class Transfer(object):
         #if already exists
         self.write_filename = self.filename
         file_ver = 1
-        while os.path.exists(self.write_filename):
+        while os.path.exists(os.path.join(download_dir, self.write_filename)):
             print('"{}" already exists'.format(self.write_filename))
             #for multiple ext
             ext = None
@@ -406,7 +414,9 @@ class Transfer(object):
             self.write_filename = '{}-{}{}'.format(rootname, file_ver, tail)
             file_ver += 1
 
-        #read data
+        write_path = os.path.join(download_dir,self.write_filename)
+
+        #receive data
         print('Receiving...')
         data_uri = base_uri + self.tmpfilename
         encrypted_transdata = urllib.request.urlopen(data_uri).read()
@@ -421,9 +431,9 @@ class Transfer(object):
             print('Validation check failed!')
             exit()
 
-        print('Save as {}'.format(self.write_filename))
+        print('Save as {}'.format(write_path))
         print('Writing...')
-        with open(self.write_filename, 'wb') as f:
+        with open(write_path, 'wb') as f:
             f.write(data)
 
         print('Receiving complete: {}({}Bytes)'.format(

@@ -9,9 +9,10 @@ License: The MIT License
 - Diffie-Hellman3 from https://gist.github.com/anonymous/11324965
 
 ##Before using
+- `wget https://gist.githubusercontent.com/anonymous/11324965/raw/DiffieHellman3.py`
 - Open 8095 UDP/TCP port
 ex)Ubuntu `sudo ufw allow 8095`
-- chmod 755 simpletrans.py
+- `chmod 755 simpletrans.py`
 
 ##How to use
 See `./simpletrans.py --help`
