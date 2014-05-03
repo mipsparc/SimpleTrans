@@ -17,6 +17,7 @@ import DiffieHellman3
 import base64
 import time
 import os.path
+import logging
 
 SALT = '''aD'T&,\L}u]Ghju[vGTuWxM{1,W]86a,Qb3OO/0eS$1}7cDmA[o61?#?sLF^\B|&}~vs
 {skgAhkb,=)qY9*xJQ.I9z6JEUbKkP1&$:j%5mHAv=Cp6Hw]bXN8NgE5HL1sRl%%,WS!"|;Z&D{=KO
@@ -90,7 +91,7 @@ class TransHandler(http.server.SimpleHTTPRequestHandler):
             self.end_headers()
             req_filename = self.path[1:]
             if req_filename == transfer.tmpfilename:
-                print('Sending...')
+                logging.info('Sending...')
                 self.wfile.write(transfer.encrypted_transdata)
                 finished_transfer = True
             elif req_filename == transfer.tmpfilename + '_data':
@@ -148,9 +149,9 @@ class SearchHost(object):
         sock.close()
 
         if received_data == response_data:
-            print('Host Found: {}'.format(address))
+            logging.info('Host Found: {}'.format(address))
         else:
-            print('Host code is invalid')
+            logging.error('Host code is invalid')
             exit()
 
     def send_node(self):
@@ -170,7 +171,7 @@ class SearchHost(object):
         self.ip_address = address[0]
         sock.close()
 
-        print('Host found: {}'.format(address))
+        logging.info('Host found: {}'.format(address))
 
     #send node/response of search packet
     def response(self):
@@ -286,7 +287,7 @@ class Transfer(object):
         try:
             self.randomkey = getpass.getpass('RandomKey:')
             if not len(self.randomkey) == 8:
-                print('RandomKey must be 8characters')
+                logging.error('RandomKey must be 8characters')
                 exit()
             psk = getpass.getpass('Pre Shared Key(Optional):')
         except KeyboardInterrupt:
@@ -304,7 +305,7 @@ class Transfer(object):
         allow_ip_address = search.ip_address
 
         #diffie-hellman key-exchange
-        print('Key exchanging...')
+        logging.info('Key exchanging...')
         keyexchanger = ExchangeKey(diffie_key, search.ip_address, self.PORT)
         keyexchanger.send_node()
         encryptkey = keyexchanger.key
@@ -325,7 +326,7 @@ class Transfer(object):
             compressed_data = bz2.compress(filedata)
 
         #encrypt
-        print('Encrypting...')
+        logging.info('Encrypting...')
         self.get_tmpfilename()
         padding_len, encrypted_data = Cipher.encrypt(encryptkey, compressed_data)
         str_padding_len = self.get_str_padding(padding_len)
@@ -333,7 +334,7 @@ class Transfer(object):
 
 
         #make metadata
-        print('Compressing...')
+        logging.info('Compressing...')
         hash_data = hashlib.sha512(filedata).hexdigest()
         metadata = json.dumps({
             'filename': basename,
@@ -352,7 +353,7 @@ class Transfer(object):
         finished_transfer = False
         while not finished_transfer:
             httpd.handle_request()
-        print('Sending complete')
+        logging.info('Sending complete')
 
     def receive(self):
         #check download dir
@@ -381,12 +382,12 @@ class Transfer(object):
         ip_addr = search.ip_address
 
         #diffie-hellman key exchange
-        print('Key exchanging...')
+        logging.info('Key exchanging...')
         keyexchanger = ExchangeKey(diffie_key, ip_addr, self.PORT)
         keyexchanger.receive_node()
         encryptkey = keyexchanger.key
 
-        print('Waiting for sending...')
+        logging.info('Waiting for sending...')
         #read metadata
         base_uri = 'http://{}:{}/'.format(ip_addr, self.PORT)
         metadata_uri = base_uri + self.tmpfilename + '_data'
@@ -399,7 +400,7 @@ class Transfer(object):
                     metadata_uri).read()
             except urllib.error.URLError as e:
                 if e.args[0].errno != 111:
-                    print(e)
+                    logging.error(e)
             else:
                 not_connected = False
 
@@ -419,7 +420,7 @@ class Transfer(object):
         self.write_filename = self.filename
         file_ver = 1
         while os.path.exists(os.path.join(download_dir, self.write_filename)):
-            print('"{}" already exists'.format(self.write_filename))
+            logging.warning('"{}" already exists'.format(self.write_filename))
             #for multiple ext
             ext = None
             tail = ''
@@ -433,7 +434,7 @@ class Transfer(object):
         write_path = os.path.join(download_dir,self.write_filename)
 
         #receive data
-        print('Receiving...')
+        logging.info('Receiving...')
         data_uri = base_uri + self.tmpfilename
         encrypted_transdata = urllib.request.urlopen(data_uri).read()
         encrypted_data = encrypted_transdata[2:]
@@ -443,7 +444,7 @@ class Transfer(object):
         compressed_data = Cipher.decrypt(encryptkey, padding_len, encrypted_data)
         
         #decompress
-        print('Decompressing...')
+        logging.info('Decompressing...')
         #not compressed
         if compress_type == 'none':
             data = compressed_data
@@ -456,15 +457,15 @@ class Transfer(object):
 
         hash_received = hashlib.sha512(data).hexdigest()
         if not hash_received == hash_data:
-            print('Validation check failed!')
+            logging.error('Validation check failed!')
             exit()
 
-        print('Save as {}'.format(write_path))
-        print('Writing...')
+        logging.info('Save as {}'.format(write_path))
+        logging.info('Writing...')
         with open(write_path, 'wb') as f:
             f.write(data)
 
-        print('Receiving complete: {}({}Bytes)'.format(
+        logging.info('Receiving complete: {}({}Bytes)'.format(
             self.filename, len(data)))
 
 
@@ -481,6 +482,9 @@ if __name__ == '__main__':
                         help='Compress:zlib(default),bz2,none', type=split_type)
     parser.add_argument('-p', '--port', type=int, metavar='PORT')
     args = parser.parse_args()
+
+    log_fmt = '%(asctime)s- %(levelname)s %(name)s- %(message)s'
+    logging.basicConfig(level=logging.INFO, format=log_fmt)
     
     if args.send:
         filename, compress = args.send
@@ -488,7 +492,7 @@ if __name__ == '__main__':
             transfer = Transfer(args.port)
             transfer.send(filename, compress)
         else:
-            print('Compress type must be zlib, bz2 or none')
+            logging.error('Compress type must be zlib, bz2 or none')
     else:
         transfer = Transfer(args.port)
         transfer.receive()
