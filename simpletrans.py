@@ -18,6 +18,8 @@ import base64
 import time
 import os.path
 import logging
+from multiprocessing import Process, Queue, Value
+import math
 
 SALT = '''aD'T&,\L}u]Ghju[vGTuWxM{1,W]86a,Qb3OO/0eS$1}7cDmA[o61?#?sLF^\B|&}~vs
 {skgAhkb,=)qY9*xJQ.I9z6JEUbKkP1&$:j%5mHAv=Cp6Hw]bXN8NgE5HL1sRl%%,WS!"|;Z&D{=KO
@@ -82,20 +84,27 @@ class Cipher(object):
 
 class TransHandler(http.server.SimpleHTTPRequestHandler):
     def do_GET(self):
-        global finished_transfer
-        global allow_ip_address
-
-        if self.client_address[0] == allow_ip_address:
+        if self.client_address[0] == transfer.allow_ip_address:
             self.send_response(200, 'OK')
             self.send_header('Content-type', 'html')
             self.end_headers()
-            req_filename = self.path[1:]
+            req_filename, number = self.path[1:].split('-')
             if req_filename == transfer.tmpfilename:
-                logging.info('Sending...')
-                self.wfile.write(transfer.encrypted_transdata)
-                finished_transfer = True
+                number = int(number)
+                already_transfer = transfer.seg_size_mib * number
+                whole_transfer = transfer.seg_size_mib * transfer.seg_numbers
+                logging.info('Sending...{}MiB/{}MiB'.format(
+                    already_transfer, whole_transfer))
+                transdata = transfer.data_q.get()
+                self.wfile.write(transdata)
+                if transfer.data_q.empty():
+                    transfer.finished_transfer.value = True
             elif req_filename == transfer.tmpfilename + '_data':
-                self.wfile.write(transfer.encrypted_transmetadata)
+                if not number:
+                    metadata = transfer.global_metadata
+                else:
+                    metadata = transfer.metadata_q.get()
+                self.wfile.write(metadata)
 
     def do_HEAD(self):
         pass
@@ -277,11 +286,21 @@ class Transfer(object):
             padding_len = int(str_padding_len)
         return padding_len
 
-    def send(self, filename, compress_type):
-        global finished_transfer
-        global allow_ip_address
 
+    #metadata maker
+    def make_metadata(self, metadata):
+        metadata = json.dumps(metadata).encode()
+        meta_padding_len, encrypted_metadata = \
+            Cipher.encrypt(self.encryptkey, metadata)
+        str_meta_padding_len = self.get_str_padding(meta_padding_len)
+        encrypted_transmetadata = \
+            str_meta_padding_len.encode() + encrypted_metadata
+        return encrypted_transmetadata
+
+    
+    def send(self, filename, compress_type):
         self.filename = filename
+        self.compress_type = compress_type
 
         print('Please enter the RandomKey on the sending machine.')
         try:
@@ -294,65 +313,59 @@ class Transfer(object):
             print()
             exit()
 
-        #generate diffiekey/search_id
+        #generate diffiekey/search_id/tmpfilename
         keygenerator = GenerateKey(self.randomkey, psk)
         diffie_key = keygenerator.get_key()
         self.search_id = keygenerator.get_search_id()
+        self.get_tmpfilename()
 
         #search client
         search = SearchHost(self.PORT, self.search_id)
         search.send_node()
-        allow_ip_address = search.ip_address
+        self.allow_ip_address = search.ip_address
 
         #diffie-hellman key-exchange
         logging.info('Key exchanging...')
         keyexchanger = ExchangeKey(diffie_key, search.ip_address, self.PORT)
         keyexchanger.send_node()
-        encryptkey = keyexchanger.key
+        self.encryptkey = keyexchanger.key
 
-        #make data
-        file_path = os.path.abspath(self.filename)
+        #prepare data
+        self.file_path = os.path.abspath(self.filename)
         basename = os.path.basename(self.filename)
-        filedata = open(file_path, 'rb').read()
-        
-        #compress
-        if compress_type == 'none':
-            compressed_data = filedata
-        elif compress_type == 'zlib':
-            import zlib
-            compressed_data = zlib.compress(filedata)
-        elif compress_type == 'bz2':
-            import bz2
-            compressed_data = bz2.compress(filedata)
+        self.file_size = os.path.getsize(self.filename)
+        self.fileobj = open(self.file_path, 'rb')
+        hash_data = hashlib.sha512(self.fileobj.read()).hexdigest()
+        self.fileobj.close()
 
-        #encrypt
-        logging.info('Encrypting...')
-        self.get_tmpfilename()
-        padding_len, encrypted_data = Cipher.encrypt(encryptkey, compressed_data)
-        str_padding_len = self.get_str_padding(padding_len)
-        self.encrypted_transdata = str_padding_len.encode() + encrypted_data
-
+        self.seg_numbers = math.ceil(self.file_size / self.seg_size)
 
         #make metadata
-        logging.info('Compressing...')
-        hash_data = hashlib.sha512(filedata).hexdigest()
-        metadata = json.dumps({
+        metadata = {
             'filename': basename,
             'hash': hash_data,
-            'compress_type':compress_type}).encode()
-        meta_padding_len, encrypted_metadata = \
-            Cipher.encrypt(encryptkey, metadata)
-        str_meta_padding_len = self.get_str_padding(meta_padding_len)
-        self.encrypted_transmetadata = \
-            str_meta_padding_len.encode() + encrypted_metadata
+            'seg_numbers': self.seg_numbers,
+            'compress_type': self.compress_type,
+            'seg_size': self.seg_size,
+            'seg_size_mib': self.seg_size_mib,
+        }
+        self.global_metadata = self.make_metadata(metadata)
 
-        #run server
-        socketserver.TCPServer.allow_reuse_address = True
-        httpd = socketserver.TCPServer(("", self.PORT), TransHandler)
+        #launch segprocess
+        self.data_q = Queue()
+        self.metadata_q = Queue()
+        seg_p = Process(target=segprocess, args=(
+            self.file_path, self.seg_size, self.seg_numbers, self.max_seg, 
+            self.compress_type, self.data_q, self.metadata_q, self.encryptkey))
+        seg_p.start()
 
-        finished_transfer = False
-        while not finished_transfer:
-            httpd.handle_request()
+        #launch server
+        self.finished_transfer = Value('b', False)
+        server_p = Process(target=server, args=(self.PORT, 
+                                                self.finished_transfer))
+        server_p.start()
+        server_p.join()
+
         logging.info('Sending complete')
 
     def receive(self):
@@ -387,32 +400,39 @@ class Transfer(object):
         keyexchanger.receive_node()
         encryptkey = keyexchanger.key
 
-        logging.info('Waiting for sending...')
-        #read metadata
         base_uri = 'http://{}:{}/'.format(ip_addr, self.PORT)
-        metadata_uri = base_uri + self.tmpfilename + '_data'
+        #read metadata
+        def get_metadata(num):
+            metadata_uri = base_uri + self.tmpfilename + '_data-'+num
+            encrypted_transmetadata = urllib.request.urlopen(
+                metadata_uri).read()
+            encrypted_metadata = encrypted_transmetadata[2:]
+            str_meta_padding_len = encrypted_transmetadata[:2]
+            meta_padding_len = self.get_padding(str_meta_padding_len)
+            metadata = Cipher.decrypt(
+                encryptkey, meta_padding_len, encrypted_metadata).decode()
+            return metadata
+
         not_connected = True
         #wait for ready
         while not_connected:
-            time.sleep(1)
+            time.sleep(0.5)
             try:
-                encrypted_transmetadata = urllib.request.urlopen(
-                    metadata_uri).read()
+                global_metadata_json = get_metadata('')
             except urllib.error.URLError as e:
                 if e.args[0].errno != 111:
                     logging.error(e)
             else:
                 not_connected = False
+        
+        global_metadata = json.loads(global_metadata_json)
+        self.filename = global_metadata['filename']
+        hash_data = global_metadata['hash']
+        seg_numbers = global_metadata['seg_numbers']
+        compress_type = global_metadata['compress_type']
+        self.seg_size = global_metadata['seg_size']
+        self.seg_size_mib = global_metadata['seg_size_mib']
 
-        encrypted_metadata = encrypted_transmetadata[2:]
-        str_meta_padding_len = encrypted_transmetadata[:2]
-        meta_padding_len = self.get_padding(str_meta_padding_len)
-        metadata = Cipher.decrypt(
-            encryptkey, meta_padding_len, encrypted_metadata).decode()
-
-        self.filename = json.loads(metadata)['filename']
-        hash_data = json.loads(metadata)['hash']
-        compress_type = json.loads(metadata)['compress_type']
 
         #write with only filename(ex. /boot/hoge->hoge)
         self.filename = os.path.basename(self.filename)
@@ -432,42 +452,92 @@ class Transfer(object):
             file_ver += 1
 
         write_path = os.path.join(download_dir,self.write_filename)
+        logging.info('Save as {}'.format(write_path))
 
         #receive data
-        logging.info('Receiving...')
-        data_uri = base_uri + self.tmpfilename
-        encrypted_transdata = urllib.request.urlopen(data_uri).read()
-        encrypted_data = encrypted_transdata[2:]
-        str_padding_len = encrypted_transdata[:2]
-        padding_len = self.get_padding(str_padding_len)
+        def get_data():
+            with open(write_path, 'wb') as f:
+                for seg_num in range(seg_numbers):
+                    already_transfer = self.seg_size_mib * seg_num
+                    whole_transfer = self.seg_size_mib * seg_numbers
+                    logging.info('Receiving... {}MiB/{}MiB'.format(
+                        already_transfer, whole_transfer))
+                    data_uri = base_uri + self.tmpfilename + '-' + str(seg_num)
+                    encrypted_transdata = urllib.request.urlopen(data_uri).read()
+                    encrypted_data = encrypted_transdata[2:]
+                    str_padding_len = encrypted_transdata[:2]
+                    padding_len = self.get_padding(str_padding_len)
 
-        compressed_data = Cipher.decrypt(encryptkey, padding_len, encrypted_data)
-        
-        #decompress
-        logging.info('Decompressing...')
-        #not compressed
-        if compress_type == 'none':
-            data = compressed_data
-        elif compress_type == 'zlib':
-            import zlib
-            data = zlib.decompress(compressed_data)
-        elif compress_type == 'bz2':
-            import bz2
-            data = bz2.decompress(compressed_data)
+                    compressed_data = Cipher.decrypt(encryptkey, padding_len, encrypted_data)
+                
+                    #decompress
+                    #not compressed
+                    if compress_type == 'none':
+                        data = compressed_data
+                    elif compress_type == 'zlib':
+                        import zlib
+                        data = zlib.decompress(compressed_data)
+                    elif compress_type == 'bz2':
+                        import bz2
+                        data = bz2.decompress(compressed_data)
 
-        hash_received = hashlib.sha512(data).hexdigest()
-        if not hash_received == hash_data:
-            logging.error('Validation check failed!')
-            exit()
+                    #TODO
+                    #hash validation check with metadata
+                    
+                    #write
+                    f.write(data)
 
-        logging.info('Save as {}'.format(write_path))
-        logging.info('Writing...')
-        with open(write_path, 'wb') as f:
-            f.write(data)
+        get_data()
 
         logging.info('Receiving complete: {}({}Bytes)'.format(
-            self.filename, len(data)))
+            self.filename, os.path.getsize(write_path)))
 
+
+#process for each transfer segment
+def segprocess(file_path, seg_size, seg_numbers, max_seg, compress_type,
+               data_q, metadata_q, encryptkey):
+    Random.atfork()
+    #read data
+    fileobj = open(file_path, 'rb')
+
+    for seg_num in range(seg_numbers):
+        #wait for sending
+        while data_q.qsize() >= max_seg:
+            time.sleep(0.1)
+
+        segdata = fileobj.read(seg_size)
+
+        #compress
+        if compress_type == 'none':
+            compressed_data = segdata
+        elif compress_type == 'zlib':
+            import zlib
+            compressed_data = zlib.compress(segdata)
+        elif compress_type == 'bz2':
+            import bz2
+            compressed_data = bz2.compress(segdata)
+
+        #encrypt
+        padding_len, encrypted_data = Cipher.encrypt(encryptkey, compressed_data)
+        str_padding_len = transfer.get_str_padding(padding_len)
+        encrypted_transdata = str_padding_len.encode() + encrypted_data
+        
+        #make metadata
+        hash_data = hashlib.sha512(segdata).hexdigest()
+        metadata = {
+            'hash': hash_data,}
+        transmetadata = transfer.make_metadata(metadata)
+
+        #put in queue
+        metadata_q.put(transmetadata)
+        data_q.put(encrypted_transdata)
+
+def server(PORT, finished_transfer):
+    socketserver.TCPServer.allow_reuse_address = True
+    httpd = socketserver.TCPServer(("", PORT), TransHandler)
+
+    while not finished_transfer.value:
+        httpd.handle_request()
 
 if __name__ == '__main__':
     def split_type(s):
@@ -483,16 +553,19 @@ if __name__ == '__main__':
     parser.add_argument('-p', '--port', type=int, metavar='PORT')
     args = parser.parse_args()
 
-    log_fmt = '%(asctime)s- %(levelname)s %(name)s- %(message)s'
+    log_fmt = '%(asctime)s- %(levelname)s - %(message)s'
     logging.basicConfig(level=logging.INFO, format=log_fmt)
+
+    transfer = Transfer(args.port)
+    transfer.max_seg = 5 #500MiB
     
     if args.send:
         filename, compress = args.send
         if compress in ['zlib','bz2','none']:
-            transfer = Transfer(args.port)
+            transfer.seg_size = 104857600 #100MiB
+            transfer.seg_size_mib = 100
             transfer.send(filename, compress)
         else:
             logging.error('Compress type must be zlib, bz2 or none')
     else:
-        transfer = Transfer(args.port)
         transfer.receive()

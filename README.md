@@ -10,15 +10,17 @@ License: The MIT License
 
 ##Before using
 - `wget https://gist.githubusercontent.com/anonymous/11324965/raw/DiffieHellman3.py`
-- Open 8095 UDP/TCP port
+- Open 8095 UDP/TCP port(default)
 ex)Ubuntu `sudo ufw allow 8095`
 - `chmod 755 simpletrans.py`
 
 ##How to use
 See `./simpletrans.py --help`
-
-##Issues
-- Big files will eat whole your memory
+Easy example
+    Receiver: `./simpletrans.py`
+    Sender: `./simpletrans.py -s test.txt`
+    Disable compress(like mp4,jpeg,png...): `./simpletrans.py -s test.txt:none`
+    Change port: `./simpletrans.py -p 8081`
 
 ##TODO
 - GUI
