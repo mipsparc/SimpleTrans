@@ -16,11 +16,11 @@ License: The MIT License
 ##How to use
 See `./simpletrans.py --help`  
 Easy example  
-    - Receiver: `./simpletrans.py`
-    - Sender: `./simpletrans.py -s test.txt`
+- Receiver: `./simpletrans.py`
+- Sender: `./simpletrans.py -s test.txt`
 Additional feature
-    - Disable compress(like mp4,jpeg,png...): `./simpletrans.py -s test.txt:none`
-    - Change port: `./simpletrans.py -p 8081` `./simpletrans.py -s test.txt -p 8081`
+- Disable compress(like mp4,jpeg,png...): `./simpletrans.py -s test.txt:none`
+- Change port: `./simpletrans.py -p 8081` `./simpletrans.py -s test.txt -p 8081`
 
 ##TODO
 - GUI
