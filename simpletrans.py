@@ -334,16 +334,12 @@ class Transfer(object):
         self.file_path = os.path.abspath(self.filename)
         basename = os.path.basename(self.filename)
         self.file_size = os.path.getsize(self.filename)
-        self.fileobj = open(self.file_path, 'rb')
-        hash_data = hashlib.sha512(self.fileobj.read()).hexdigest()
-        self.fileobj.close()
-
+        
         self.seg_numbers = math.ceil(self.file_size / self.seg_size)
 
         #make metadata
         metadata = {
             'filename': basename,
-            'hash': hash_data,
             'seg_numbers': self.seg_numbers,
             'compress_type': self.compress_type,
             'seg_size': self.seg_size,
@@ -415,6 +411,7 @@ class Transfer(object):
 
         not_connected = True
         #wait for ready
+        logging.info('Waiting for ready...')
         while not_connected:
             time.sleep(0.5)
             try:
@@ -427,7 +424,6 @@ class Transfer(object):
         
         global_metadata = json.loads(global_metadata_json)
         self.filename = global_metadata['filename']
-        hash_data = global_metadata['hash']
         seg_numbers = global_metadata['seg_numbers']
         compress_type = global_metadata['compress_type']
         self.seg_size = global_metadata['seg_size']
@@ -458,6 +454,10 @@ class Transfer(object):
         def get_data():
             with open(write_path, 'wb') as f:
                 for seg_num in range(seg_numbers):
+                    metadata_json = get_metadata(str(seg_num))
+                    metadata = json.loads(metadata_json)
+                    meta_hash = metadata['hash']
+
                     already_transfer = self.seg_size_mib * seg_num
                     whole_transfer = self.seg_size_mib * seg_numbers
                     logging.info('Receiving... {}MiB/{}MiB'.format(
@@ -481,9 +481,12 @@ class Transfer(object):
                         import bz2
                         data = bz2.decompress(compressed_data)
 
-                    #TODO
-                    #hash validation check with metadata
-                    
+                    #hash validation
+                    received_hash = hashlib.sha256(data).hexdigest()
+                    if received_hash != meta_hash:
+                        logging.critical('Received data check failed!')
+                        exit()
+
                     #write
                     f.write(data)
 
@@ -506,6 +509,7 @@ def segprocess(file_path, seg_size, seg_numbers, max_seg, compress_type,
             time.sleep(0.1)
 
         segdata = fileobj.read(seg_size)
+        hash_data = hashlib.sha256(segdata).hexdigest()
 
         #compress
         if compress_type == 'none':
@@ -523,7 +527,6 @@ def segprocess(file_path, seg_size, seg_numbers, max_seg, compress_type,
         encrypted_transdata = str_padding_len.encode() + encrypted_data
         
         #make metadata
-        hash_data = hashlib.sha512(segdata).hexdigest()
         metadata = {
             'hash': hash_data,}
         transmetadata = transfer.make_metadata(metadata)
