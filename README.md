@@ -19,7 +19,7 @@ Easy example
 - Receiver: `./simpletrans.py`
 - Sender: `./simpletrans.py -s test.txt`
 Additional feature  
-- Enable compress: `./simpletrans.py -s test.txt:bz2
+- Enable compress: `./simpletrans.py -s test.txt:bz2`
 - Change port: `./simpletrans.py -p 8081` `./simpletrans.py -s test.txt -p 8081`
 
 ##TODO
