@@ -109,9 +109,8 @@ class TransHandler(http.server.SimpleHTTPRequestHandler):
     def do_HEAD(self):
         pass
 
-    #be quiet!
-#    def log_message(self, format, *args):
-#        pass
+    def log_message(self, format, *args):
+        pass
 
 
 class SearchHost(object):
@@ -264,11 +263,8 @@ class ExchangeKey(object):
 
 class Transfer(object):
     def __init__(self, port):
-        if not port:
-            self.PORT = 8095
-        else:
-            self.PORT = int(port)
-
+        self.PORT = port
+        
     def get_tmpfilename(self):
         self.tmpfilename = hashlib.sha1(
             self.search_id).hexdigest()[:10]
@@ -302,6 +298,13 @@ class Transfer(object):
         self.filename = filename
         self.compress_type = compress_type
 
+        self.file_path = os.path.abspath(self.filename)
+        if not os.path.exists(self.file_path):
+            logging.error('The file could not find')
+            exit()
+        basename = os.path.basename(self.file_path)
+        self.file_size = os.path.getsize(self.file_path)
+
         print('Please enter the RandomKey on the sending machine.')
         try:
             self.randomkey = getpass.getpass('RandomKey:')
@@ -329,17 +332,13 @@ class Transfer(object):
         keyexchanger = ExchangeKey(diffie_key, search.ip_address, self.PORT)
         keyexchanger.send_node()
         self.encryptkey = keyexchanger.key
-
-        #prepare data
-        self.file_path = os.path.abspath(self.filename)
-        basename = os.path.basename(self.filename)
-        self.file_size = os.path.getsize(self.filename)
         
         self.seg_numbers = math.ceil(self.file_size / self.seg_size)
 
         #make metadata
         metadata = {
             'filename': basename,
+            'filesize': self.file_size,
             'seg_numbers': self.seg_numbers,
             'compress_type': self.compress_type,
             'seg_size': self.seg_size,
@@ -428,7 +427,7 @@ class Transfer(object):
         compress_type = global_metadata['compress_type']
         self.seg_size = global_metadata['seg_size']
         self.seg_size_mib = global_metadata['seg_size_mib']
-
+        self.file_size = global_metadata['filesize']
 
         #write with only filename(ex. /boot/hoge->hoge)
         self.filename = os.path.basename(self.filename)
@@ -448,7 +447,7 @@ class Transfer(object):
             file_ver += 1
 
         write_path = os.path.join(download_dir,self.write_filename)
-        logging.info('Save as {}'.format(write_path))
+        logging.info('Save as {}({}B)'.format(write_path, self.file_size))
 
         #receive data
         def get_data():
@@ -554,14 +553,24 @@ if __name__ == '__main__':
     parser.add_argument('-s', '--send', metavar='FILENAME[:COMPRESS-TYPE]',
                         help='Compress:zlib,bz2,none(default)', type=split_type)
     parser.add_argument('-p', '--port', type=int, metavar='PORT')
+    parser.add_argument('--maxsegment', type=int, metavar='MAXSEGMENT',
+                        help='Max segment waiting(about 100MiB each,default:3)')
     args = parser.parse_args()
 
     log_fmt = '%(asctime)s- %(levelname)s - %(message)s'
     logging.basicConfig(level=logging.INFO, format=log_fmt)
 
-    transfer = Transfer(args.port)
-    transfer.max_seg = 5 #500MiB
-    
+    if not args.port:
+        port = 8095
+    else:
+        port = int(args.port)
+    transfer = Transfer(port)
+
+    if not args.maxsegment:
+        transfer.max_seg = 3 #500MiB
+    else:
+        transfer.max_seg = args.maxsegment
+
     if args.send:
         filename, compress = args.send
         if compress in ['zlib','bz2','none']:
