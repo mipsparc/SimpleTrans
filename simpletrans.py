@@ -97,8 +97,8 @@ class TransHandler(http.server.SimpleHTTPRequestHandler):
                     already_transfer, whole_transfer))
                 transdata = transfer.data_q.get()
                 self.wfile.write(transdata)
-                if transfer.data_q.empty():
-                    transfer.finished_transfer.value = True
+                #count finished seg numbers
+                transfer.finished_trans_num.value += 1
             elif req_filename == transfer.tmpfilename + '_data':
                 if not number:
                     metadata = transfer.global_metadata
@@ -110,8 +110,8 @@ class TransHandler(http.server.SimpleHTTPRequestHandler):
         pass
 
     #be quiet!
-    def log_message(self, format, *args):
-        pass
+#    def log_message(self, format, *args):
+#        pass
 
 
 class SearchHost(object):
@@ -360,9 +360,9 @@ class Transfer(object):
         seg_p.start()
 
         #launch server
-        self.finished_transfer = Value('b', False)
-        server_p = Process(target=server, args=(self.PORT, 
-                                                self.finished_transfer))
+        self.finished_trans_num = Value('L', 0)
+        server_p = Process(target=server, 
+                           args=(self.PORT, self.finished_trans_num, self.seg_numbers))
         server_p.start()
         server_p.join()
 
@@ -532,11 +532,11 @@ def segprocess(file_path, seg_size, seg_numbers, max_seg, compress_type,
         metadata_q.put(transmetadata)
         data_q.put(encrypted_transdata)
 
-def server(PORT, finished_transfer):
+def server(PORT, finished_trans_num, seg_numbers):
     socketserver.TCPServer.allow_reuse_address = True
     httpd = socketserver.TCPServer(("", PORT), TransHandler)
 
-    while not finished_transfer.value:
+    while not finished_trans_num.value >= seg_numbers:
         httpd.handle_request()
 
 if __name__ == '__main__':
