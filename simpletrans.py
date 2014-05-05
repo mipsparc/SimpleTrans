@@ -544,7 +544,7 @@ def server(PORT, finished_trans_num, seg_numbers):
 
 if __name__ == '__main__':
     def split_type(s):
-        default = 'zlib'
+        default = 'none'
         if ":" in s:
             return tuple(s.split(":", 1))
         else:
@@ -552,7 +552,7 @@ if __name__ == '__main__':
 
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('-s', '--send', metavar='FILENAME[:COMPRESS-TYPE]',
-                        help='Compress:zlib(default),bz2,none', type=split_type)
+                        help='Compress:zlib,bz2,none(default)', type=split_type)
     parser.add_argument('-p', '--port', type=int, metavar='PORT')
     args = parser.parse_args()
 
