@@ -569,6 +569,8 @@ if __name__ == '__main__':
     if not args.maxsegment:
         transfer.max_seg = 3 #500MiB
     else:
+        if not args.send:
+            logging.info('--maxsegment only works on sending')
         transfer.max_seg = args.maxsegment
 
     if args.send:

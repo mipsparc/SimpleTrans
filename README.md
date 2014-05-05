@@ -18,11 +18,12 @@ See `./simpletrans.py --help`
 
 ###Easy example
 - Receiver: `./simpletrans.py`
-- Sender: `./simpletrans.py -s test.txt`
+- Sender: `./simpletrans.py --send test.txt`
 
 ###Additional feature  
 - Enable compress: `./simpletrans.py -s test.txt:bz2`
 - Change port: `./simpletrans.py -p 8081` `./simpletrans.py -s test.txt -p 8081`
+- Change max segment numbers(If you have plenty of memory): `./simpletrans.py -s test.txt --maxsegment 5`
 
 ##TODO
 - GUI
