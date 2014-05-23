@@ -60,7 +60,7 @@ class GenerateKey(object):
 class Cipher(object):
     @classmethod
     def encrypt(self, key, data):
-        iv = random.getrandbits(AES.block_size)
+        iv = Random.new().read(AES.block_size)
 
         #padding
         data_len = len(data)
@@ -130,7 +130,7 @@ class SearchHost(object):
                 self.receive_response()
             except socket.timeout:
                 pass
-        self.keyex.decrypt_encryptkey(encrypted_encryptkey)
+        self.keyex.decrypt_encryptkey(self.encrypted_encryptkey)
         return self.keyex.encryptkey
 
     #receive node
@@ -163,8 +163,9 @@ class SearchHost(object):
         received_data = conn.recv(4096)
         sock.close()
 
-        if json.loads(received_data)['id']==self.search_id:
-            self.encrypted_encryptkey = json.loads(received_data)['key']
+        if json.loads(received_data.decode())['id']==self.search_id:
+            self.encrypted_encryptkey = \
+                base64.b64decode(json.loads(received_data.decode())['key'])
             logging.info('Host Found: {}'.format(address))
         else:
             raise socket.timeout
@@ -185,19 +186,20 @@ class SearchHost(object):
         sock.bind((HOST, self.PORT))
         received_data = ''
         while not received_data:
-            received_data, address = sock.recvfrom(4096)
-            if json.loads(received_data)['id']!=self.search_id:
-               received_data = '' 
+            received_data, address = sock.recvfrom(65535)
+            if received_data == '' \
+                or json.loads(received_data.decode())['id']!=self.search_id:
+                received_data = '' 
         self.ip_address = address[0]
         sock.close()
 
-        self.pubkey = json.loads(received_data)['pubkey']
+        self.pubkey = json.loads(received_data.decode())['pubkey']
         logging.info('Host found: {}'.format(address))
 
     #send node/response of search packet
     def response(self):
         #TCP
-        key = self.keyex.encrypted_encryptkey
+        key = base64.b64encode(self.keyex.encrypted_encryptkey).decode()
 
         response_data = json.dumps({'id':self.search_id, 'key':key}).encode()
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -222,7 +224,7 @@ class KeyExchange(object):
     #sender
     def make_encryptkey(self):
         #make encryptkey
-        self.encryptkey = random.getrandbits(256)
+        self.encryptkey = Random.new().read(32)
 
     #sender
     def encrypt_encryptkey(self):
@@ -231,7 +233,8 @@ class KeyExchange(object):
 
     #receiver
     def decrypt_encryptkey(self, encrypted_encryptkey):
-        self.encryptkey = PKCS1_OAEP.new(self.rsa).decrypt(encrypted_encryptkey)
+        self.encryptkey = \
+            PKCS1_OAEP.new(self.rsa).decrypt(encrypted_encryptkey)
 
 
 class Transfer(object):
@@ -301,6 +304,7 @@ class Transfer(object):
         #search client
         search = SearchHost(self.PORT, self.search_id, passphrase)
         self.encryptkey = search.send_node()
+        print(len(self.encryptkey))
         self.allow_ip_address = search.ip_address
         
         self.seg_numbers = math.ceil(self.file_size / self.seg_size)
@@ -540,6 +544,8 @@ if __name__ == '__main__':
     if not args.maxsegment:
         transfer.max_seg = 3 #500MiB
     else:
+        if not args.send:
+            logging.info('--maxsegment only works on sending')
         transfer.max_seg = args.maxsegment
 
     if args.send:
