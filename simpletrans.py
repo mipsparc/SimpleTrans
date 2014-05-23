@@ -305,7 +305,6 @@ class Transfer(object):
         #search client
         search = SearchHost(self.PORT, self.search_id, passphrase)
         self.encryptkey = search.send_node()
-        print(len(self.encryptkey))
         self.allow_ip_address = search.ip_address
         
         self.seg_numbers = math.ceil(self.file_size / self.seg_size)

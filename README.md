@@ -6,11 +6,9 @@ Author: mipsparc(Twitter:@mipsparc, Web:https://mipsparc.net/, Mail:mipsparc@gma
 License: The MIT License
 
 ##Required module
-- Diffie-Hellman3 from https://gist.github.com/anonymous/11324965
 - PyCrypto
 
 ##Before using
-1. `wget https://gist.githubusercontent.com/anonymous/11324965/raw/DiffieHellman3.py`
 1. Open 8095 UDP/TCP port(default) ex)Ubuntu `sudo ufw allow 8095`
 1. `chmod 755 simpletrans.py`
 
