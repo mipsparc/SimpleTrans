@@ -6,14 +6,15 @@ import argparse
 import getpass
 import hashlib
 from Crypto.Cipher import AES
+from Crypto.PublicKey import RSA
 from Crypto import Random
 from Crypto.Random import random
+from Crypto.Cipher import PKCS1_OAEP
 import json
 import http.server
 import socketserver
 import urllib.request
 import socket
-import DiffieHellman3
 import base64
 import time
 import os.path
@@ -40,26 +41,26 @@ class RandomKey(object):
 
 class GenerateKey(object):
     def __init__(self, randomkey, psk):
-        hash_times = 10000
+        hash_times = 50000
         seed = randomkey + psk + SALT
-        self.hash_result = str(seed).encode()
+        self.hash_result = seed.encode()
         for i in range(hash_times):
             self.hash_result += (psk + SALT).encode()
             self.hash_result = hashlib.sha256(self.hash_result).digest()
 
     def get_key(self):
-        diffie_key = hashlib.sha256(self.hash_result).digest()
-        return diffie_key
+        passphrase = hashlib.sha256(self.hash_result).digest()
+        return passphrase
 
     def get_search_id(self):
-        search_id = self.hash_result[:6]
+        search_id = hashlib.sha1(self.hash_result[:128]).hexdigest()[:4]
         return search_id
 
 
 class Cipher(object):
     @classmethod
     def encrypt(self, key, data):
-        iv = Random.new().read(AES.block_size)
+        iv = random.getrandbits(AES.block_size)
 
         #padding
         data_len = len(data)
@@ -114,23 +115,30 @@ class TransHandler(http.server.SimpleHTTPRequestHandler):
 
 
 class SearchHost(object):
-    def __init__(self, PORT, search_id):
+    def __init__(self, PORT, search_id, passphrase):
         self.PORT = PORT
         self.search_id = search_id
         self.ip_address = None
+        self.passphrase = passphrase
 
     def receive_node(self):
+        self.keyex = KeyExchange(self.passphrase)
+        self.keyex.make_pubkey()
         while not self.ip_address:
             self.search()
             try:
                 self.receive_response()
             except socket.timeout:
                 pass
+        self.keyex.decrypt_encryptkey(encrypted_encryptkey)
+        return self.keyex.encryptkey
 
     #receive node
     def search(self):
         #UDP
-        search_data = hashlib.sha256(self.search_id + b'FIND').digest()
+        pubkey = self.keyex.pubkey
+        search_data = json.dumps(
+            {'id':self.search_id,'pubkey':pubkey}).encode()
 
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, True)
@@ -141,7 +149,6 @@ class SearchHost(object):
     #receive node
     def receive_response(self):
         #TCP
-        response_data = hashlib.sha256(self.search_id + b'ACCEPT').digest()
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, True)
 
@@ -156,15 +163,19 @@ class SearchHost(object):
         received_data = conn.recv(4096)
         sock.close()
 
-        if received_data == response_data:
+        if json.loads(received_data)['id']==self.search_id:
+            self.encrypted_encryptkey = json.loads(received_data)['key']
             logging.info('Host Found: {}'.format(address))
         else:
-            logging.error('Host code is invalid')
-            exit()
+            raise socket.timeout
 
     def send_node(self):
         self.receive_search()
+        self.keyex = KeyExchange(self.passphrase, self.pubkey)
+        self.keyex.make_encryptkey()
+        self.keyex.encrypt_encryptkey()
         self.response()
+        return self.keyex.encryptkey
 
     #send node/receiving search packet
     def receive_search(self):
@@ -172,19 +183,23 @@ class SearchHost(object):
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         HOST = ''
         sock.bind((HOST, self.PORT))
-        search_data = hashlib.sha256(self.search_id + b'FIND').digest()
         received_data = ''
-        while not received_data == search_data:
+        while not received_data:
             received_data, address = sock.recvfrom(4096)
+            if json.loads(received_data)['id']!=self.search_id:
+               received_data = '' 
         self.ip_address = address[0]
         sock.close()
 
+        self.pubkey = json.loads(received_data)['pubkey']
         logging.info('Host found: {}'.format(address))
 
     #send node/response of search packet
     def response(self):
         #TCP
-        response_data = hashlib.sha256(self.search_id + b'ACCEPT').digest()
+        key = self.keyex.encrypted_encryptkey
+
+        response_data = json.dumps({'id':self.search_id, 'key':key}).encode()
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, True)
         sock.connect((self.ip_address, self.PORT))
@@ -192,82 +207,41 @@ class SearchHost(object):
         sock.close()
 
 
-class ExchangeKey(object):
-    def __init__(self, diffie_key, ip_address, PORT):
-        self.diffie_key = diffie_key
-        self.ip_address = ip_address
-        self.PORT = PORT
-        self.diffie = DiffieHellman3.DiffieHellman()
-        self.gen_publickey()
-        self.encrypt_publickey()
+class KeyExchange(object):
+    def __init__(self, passphrase, pubkey=None):
+        self.passphrase = passphrase
+        if pubkey:
+            self.pubkey = pubkey.encode()
 
-    def encrypt_publickey(self):
-        padding_len, encrypted_pubkey = Cipher.encrypt(
-            self.diffie_key, str(self.pubkey).encode())
-        b64_encrypted_pubkey = base64.b64encode(encrypted_pubkey)
-        self.send_data = json.dumps(
-            (padding_len, b64_encrypted_pubkey.decode())).encode()
+    #receiver
+    def make_pubkey(self):
+        self.rsa = RSA.generate(2048)
+        self.pubkey = self.rsa.publickey().exportKey(
+            passphrase=self.passphrase).decode()
 
-    def decrypt_publickey(self):
-        opposit_padding_len, b64_encrypted_opposit_pubkey = json.loads(
-            self.received_data)
-        encrypted_opposit_pubkey = base64.b64decode(
-            b64_encrypted_opposit_pubkey.encode())
-        self.opposit_pubkey = int(Cipher.decrypt(
-            self.diffie_key, opposit_padding_len, encrypted_opposit_pubkey))
+    #sender
+    def make_encryptkey(self):
+        #make encryptkey
+        self.encryptkey = random.getrandbits(256)
 
-    def gen_publickey(self):
-        self.pubkey = self.diffie.publicKey
+    #sender
+    def encrypt_encryptkey(self):
+        self.rsa = RSA.importKey(self.pubkey, passphrase=self.passphrase)
+        self.encrypted_encryptkey = PKCS1_OAEP.new(self.rsa).encrypt(self.encryptkey)
 
-    def gen_key(self):
-        self.diffie.genKey(self.opposit_pubkey)
-        self.key = self.diffie.getKey()
-
-    def send(self):
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, True)
-        sock.connect((self.ip_address, self.PORT))
-        sock.send(self.send_data)
-        sock.close()
-
-    def receive(self):
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, True)
-
-        HOST = ''
-        sock.bind((HOST, self.PORT))
-        sock.listen(1)
-
-        conn, address = sock.accept()
-        self.received_data = ''
-        while True:
-            recv_data = conn.recv(12288).decode()
-            if recv_data == '':
-                break
-            self.received_data += recv_data
-
-    def send_node(self):
-        time.sleep(0.5)
-        self.send()
-        self.receive()
-        self.decrypt_publickey()
-        self.gen_key()
-
-    def receive_node(self):
-        self.receive()
-        time.sleep(0.5)
-        self.send()
-        self.decrypt_publickey()
-        self.gen_key()
+    #receiver
+    def decrypt_encryptkey(self, encrypted_encryptkey):
+        self.encryptkey = PKCS1_OAEP.new(self.rsa).decrypt(encrypted_encryptkey)
 
 
 class Transfer(object):
-    def __init__(self, port):
+    def __init__(self, port, key):
         self.PORT = port
+        self.key = key
         
     def get_tmpfilename(self):
         self.tmpfilename = hashlib.sha1(
-            self.search_id).hexdigest()[:10]
+            self.search_id.encode()).hexdigest()[:10]
 
     def get_str_padding(self, padding_len):
         str_padding_len = str(padding_len)
@@ -282,7 +256,6 @@ class Transfer(object):
             padding_len = int(str_padding_len)
         return padding_len
 
-
     #metadata maker
     def make_metadata(self, metadata):
         metadata = json.dumps(metadata).encode()
@@ -292,7 +265,6 @@ class Transfer(object):
         encrypted_transmetadata = \
             str_meta_padding_len.encode() + encrypted_metadata
         return encrypted_transmetadata
-
     
     def send(self, filename, compress_type):
         self.filename = filename
@@ -305,33 +277,31 @@ class Transfer(object):
         basename = os.path.basename(self.file_path)
         self.file_size = os.path.getsize(self.file_path)
 
-        print('Please enter the RandomKey on the sending machine.')
-        try:
-            self.randomkey = getpass.getpass('RandomKey:')
-            if not len(self.randomkey) == 8:
-                logging.error('RandomKey must be 8characters')
+        if not self.key:
+            print('Please enter the RandomKey on the sending machine.')
+            try:
+                self.randomkey = getpass.getpass('RandomKey:')
+                if not len(self.randomkey) == 8:
+                    logging.error('RandomKey must be 8characters')
+                    exit()
+                psk = getpass.getpass('Pre Shared Key(Optional):')
+            except KeyboardInterrupt:
+                print()
                 exit()
-            psk = getpass.getpass('Pre Shared Key(Optional):')
-        except KeyboardInterrupt:
-            print()
-            exit()
+        else:
+            self.randomkey = self.key
+            psk = ''
 
         #generate diffiekey/search_id/tmpfilename
         keygenerator = GenerateKey(self.randomkey, psk)
-        diffie_key = keygenerator.get_key()
+        passphrase = keygenerator.get_key()
         self.search_id = keygenerator.get_search_id()
         self.get_tmpfilename()
 
         #search client
-        search = SearchHost(self.PORT, self.search_id)
-        search.send_node()
+        search = SearchHost(self.PORT, self.search_id, passphrase)
+        self.encryptkey = search.send_node()
         self.allow_ip_address = search.ip_address
-
-        #diffie-hellman key-exchange
-        logging.info('Key exchanging...')
-        keyexchanger = ExchangeKey(diffie_key, search.ip_address, self.PORT)
-        keyexchanger.send_node()
-        self.encryptkey = keyexchanger.key
         
         self.seg_numbers = math.ceil(self.file_size / self.seg_size)
 
@@ -370,30 +340,28 @@ class Transfer(object):
             os.mkdir(download_dir)
         except FileExistsError:
             pass
-        self.randomkey = RandomKey().get()
-        try:
-            print('RandomKey:{}'.format(self.randomkey))
-            psk = getpass.getpass('Pre Shared Key(Optional):')
-        except KeyboardInterrupt:
-            print()
-            exit()
+        if not self.key:
+            self.randomkey = RandomKey().get()
+            try:
+                print('RandomKey:{}'.format(self.randomkey))
+                psk = getpass.getpass('Pre Shared Key(Optional):')
+            except KeyboardInterrupt:
+                print()
+                exit()
+        else:
+            self.randomkey = self.key
+            psk = ''
 
         keygenerator = GenerateKey(self.randomkey, psk)
-        diffie_key = keygenerator.get_key()
+        passphrase = keygenerator.get_key()
         self.search_id = keygenerator.get_search_id()
 
         self.get_tmpfilename()
 
         #search host
-        search = SearchHost(self.PORT, self.search_id)
-        search.receive_node()
+        search = SearchHost(self.PORT, self.search_id, passphrase)
+        encryptkey = search.receive_node()
         ip_addr = search.ip_address
-
-        #diffie-hellman key exchange
-        logging.info('Key exchanging...')
-        keyexchanger = ExchangeKey(diffie_key, ip_addr, self.PORT)
-        keyexchanger.receive_node()
-        encryptkey = keyexchanger.key
 
         base_uri = 'http://{}:{}/'.format(ip_addr, self.PORT)
         #read metadata
@@ -555,6 +523,9 @@ if __name__ == '__main__':
     parser.add_argument('-p', '--port', type=int, metavar='PORT')
     parser.add_argument('--maxsegment', type=int, metavar='MAXSEGMENT',
                         help='Max segment waiting(about 100MiB each,default:3)')
+    #static randomkey(hidden)
+    #DO NOT USE IF YOU ARE NOT DEBUGGING
+    parser.add_argument('--key', help=argparse.SUPPRESS)
     args = parser.parse_args()
 
     log_fmt = '%(asctime)s- %(levelname)s - %(message)s'
@@ -564,7 +535,7 @@ if __name__ == '__main__':
         port = 8095
     else:
         port = int(args.port)
-    transfer = Transfer(port)
+    transfer = Transfer(port, args.key)
 
     if not args.maxsegment:
         transfer.max_seg = 3 #500MiB
