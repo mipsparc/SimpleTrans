@@ -30,7 +30,8 @@ $NEpR|)muq?e6q&>j~,1Gj{IdecLtDzSSyK2z8wWH'Q]<&8P~'QIlX|~PY*]=sQakDO55}lmFehH'''
 
 class RandomKey(object):
     def __init__(self):
-        char_map = '23456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz'
+        #char_map = '23456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz'
+        char_map = '1234567890'
         key_length = 8
         self.randomkey = ''.join(
             [random.choice(char_map) for i in range(key_length)])
@@ -320,22 +321,23 @@ class Transfer(object):
         }
         self.global_metadata = self.make_metadata(metadata)
 
-        #launch segprocess
-        self.data_q = Queue()
-        self.metadata_q = Queue()
-        seg_p = Process(target=segprocess, args=(
-            self.file_path, self.seg_size, self.seg_numbers, self.max_seg, 
-            self.compress_type, self.data_q, self.metadata_q, self.encryptkey))
-        seg_p.start()
+        if __name__ == '__main__':
+            #launch segprocess
+            self.data_q = Queue()
+            self.metadata_q = Queue()
+            seg_p = Process(target=segprocess, args=(
+                self.file_path, self.seg_size, self.seg_numbers, self.max_seg, 
+                self.compress_type, self.data_q, self.metadata_q, self.encryptkey))
+            seg_p.start()
 
-        #launch server
-        self.finished_trans_num = Value('L', 0)
-        server_p = Process(target=server, 
-                           args=(self.PORT, self.finished_trans_num, self.seg_numbers))
-        server_p.start()
-        server_p.join()
+            #launch server
+            self.finished_trans_num = Value('L', 0)
+            server_p = Process(target=server, 
+                               args=(self.PORT, self.finished_trans_num, self.seg_numbers))
+            server_p.start()
+            server_p.join()
 
-        logging.info('Sending complete')
+            logging.info('Sending complete')
 
     def receive(self):
         #check download dir
